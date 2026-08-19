@@ -4,15 +4,15 @@
 #include <ncurses.h>
 #include <stdint.h>
 #include "state.h"
+#include "codec.h"
 
 extern unsigned long ui_frame_counter;
 extern int ui_last_selected_idx;
 
 // Cache structs to avoid re-fetching constantly
 typedef struct {
-    struct DANAMetadata meta;
-    struct DANAWaveFormat fmt;
-    uint32_t bps;
+    KoniMetadata meta;
+    KoniAudioFormat fmt;
     int idx;
     char filename[256];
     uint32_t smooth_rpos;

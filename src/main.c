@@ -2,6 +2,7 @@
 #include "file_list.h"
 #include "audio.h"
 #include "ui.h"
+#include "codec.h"
 
 #include <locale.h>
 #include <unistd.h>
@@ -19,6 +20,6 @@ int main(int argc, char **argv) {
     ui_run();
     
     pthread_join(audio_thread, NULL);
-    DANAMetadata_Release(&p_header.metadata);
+    koni_metadata_free(&p_metadata);
     return 0;
 }

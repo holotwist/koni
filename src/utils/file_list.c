@@ -3,6 +3,7 @@
 
 #include "file_list.h"
 #include "state.h"
+#include "codec.h"
 #include <dirent.h>
 #include <sys/stat.h>
 #include <string.h>
@@ -36,7 +37,7 @@ void load_directory(const char *path) {
         if (stat(full_path, &st) == 0) {
             int is_dir = S_ISDIR(st.st_mode);
             char *ext = strrchr(entry->d_name, '.');
-            if (is_dir || (ext && (strcasecmp(ext, ".dana") == 0 || strcasecmp(ext, ".dahl") == 0))) {
+            if (is_dir || koni_is_supported_extension(ext)) {
                 strncpy(files[num_files].name, entry->d_name, 255);
                 files[num_files].is_dir = is_dir;
                 num_files++;

@@ -14,10 +14,8 @@ void draw_vis_panel(int y, int x, int h, int w) {
     if (current_vis_mode == 0) printw("1:Oscilloscope"); else printw("1:Spectrum");
     attroff(active_tab == 1 ? A_REVERSE : A_NORMAL); printw(" ");
     
-    attron(active_tab == 2 ? A_REVERSE : A_NORMAL); printw("2:Codec info"); attroff(active_tab == 2 ? A_REVERSE : A_NORMAL); printw(" ");
-    
     if (ui_cache.meta.lyrics != NULL) {
-        attron(active_tab == 3 ? A_REVERSE : A_NORMAL); printw("3:lyric"); attroff(active_tab == 3 ? A_REVERSE : A_NORMAL); printw(" ");
+        attron(active_tab == 2 ? A_REVERSE : A_NORMAL); printw("2:lyric"); attroff(active_tab == 2 ? A_REVERSE : A_NORMAL); printw(" ");
     }
     printw(" -["); attron(COLOR_PAIR(5)); printw("C:Switch Visualizer"); attroff(COLOR_PAIR(5)); printw("] ");
     printw("-["); attron(COLOR_PAIR(5)); printw(is_fullscreen ? "F:Windowed" : "F:Fullscreen"); attroff(COLOR_PAIR(5)); printw("] ");
@@ -106,20 +104,6 @@ void draw_vis_panel(int y, int x, int h, int w) {
             }
         }
     } else if (active_tab == 2) {
-        int line = y + 1;
-        if (++line < y + h - 1) mvprintw(line,  x + 4, "Blocks:");
-        if (++line < y + h - 1) mvprintw(line,  x + 6, "Decoded %u blocks", atomic_load(&p_decoded_blocks));
-        if (++line < y + h - 1) mvprintw(line,  x + 6, "Played %u buffers", atomic_load(&p_played_buffers));
-        if (++line < y + h - 1) mvprintw(line,  x + 6, "Lost %u buffers", atomic_load(&p_lost_buffers));
-        if (++line < y + h - 1); // blank
-        if (++line < y + h - 1) mvprintw(line,  x + 4, "Input/Read:");
-        if (++line < y + h - 1) mvprintw(line,  x + 6, "Media data size %u KiB", atomic_load(&p_media_data_size_kib));
-        if (++line < y + h - 1) mvprintw(line,  x + 6, "Input bitrate %u kb/s", atomic_load(&p_input_bitrate_kbs));
-        if (++line < y + h - 1) mvprintw(line,  x + 6, "Demuxed data size %u KiB", atomic_load(&p_demuxed_data_size_kib));
-        if (++line < y + h - 1) mvprintw(line,  x + 6, "Content bitrate %u kb/s", atomic_load(&p_content_bitrate_kbs));
-        if (++line < y + h - 1) mvprintw(line,  x + 6, "Discarded (corrupt) %u", atomic_load(&p_discarded));
-        if (++line < y + h - 1) mvprintw(line,  x + 6, "Dropped (discont) %u", atomic_load(&p_dropped));
-    } else if (active_tab == 3) {
         for (int gy = 0; gy < draw_h; gy++) mvhline(y + 2 + gy, x + 2, ' ', draw_w);
         if (ui_cache.meta.lyrics) {
             int ly = y + 2;
@@ -131,7 +115,7 @@ void draw_vis_panel(int y, int x, int h, int w) {
             }
             free(lyrics_copy);
         } else {
-            mvprintw(y + 2, x + 4, "DanaID: No Lyrics available");
+            mvprintw(y + 2, x + 4, "No Lyrics available");
         }
     }
 }
