@@ -80,8 +80,27 @@ void draw_player_panel(int y, int x, int h, int w) {
         if (clip_hold_r > 0) attroff(COLOR_PAIR(10) | A_REVERSE);
     }
 
-    // Volume
+    // Indicators & volume
     if (vol_y != -1 && h > 3) {
+        int r_mode = atomic_load(&play_mode_repeat);
+        bool shuf = atomic_load(&play_mode_shuffle);
+        
+        if (w >= 22) {
+            int ind_x = x + w - 21; // Position right before volume
+            
+            if (shuf) attron(COLOR_PAIR(3) | A_BOLD); else attron(COLOR_PAIR(2) | A_DIM);
+            mvaddch(vol_y, ind_x, 'S');
+            if (shuf) attroff(COLOR_PAIR(3) | A_BOLD); else attroff(COLOR_PAIR(2) | A_DIM);
+            
+            if (r_mode == REPEAT_ALL) attron(COLOR_PAIR(3) | A_BOLD); else attron(COLOR_PAIR(2) | A_DIM);
+            mvaddch(vol_y, ind_x + 2, 'R');
+            if (r_mode == REPEAT_ALL) attroff(COLOR_PAIR(3) | A_BOLD); else attroff(COLOR_PAIR(2) | A_DIM);
+            
+            if (r_mode == REPEAT_ONE) attron(COLOR_PAIR(3) | A_BOLD); else attron(COLOR_PAIR(2) | A_DIM);
+            mvaddch(vol_y, ind_x + 4, '1');
+            if (r_mode == REPEAT_ONE) attroff(COLOR_PAIR(3) | A_BOLD); else attroff(COLOR_PAIR(2) | A_DIM);
+        }
+        
         mvprintw(vol_y, x + w - 14, "Vol: %3d%%", atomic_load(&volume));
     }
 
@@ -106,7 +125,27 @@ void draw_player_panel(int y, int x, int h, int w) {
             attroff(COLOR_PAIR(5));
             printw(" %02u:%02u", tot_sec / 60, tot_sec % 60);
 
-            if (h == 3) mvprintw(prog_y, x + w - 12, "Vol:%3d%%", atomic_load(&volume));
+            if (h == 3 && w >= 28) {
+                bool shuf = atomic_load(&play_mode_shuffle);
+                int r_mode = atomic_load(&play_mode_repeat);
+                int ind_x = x + w - 22;
+                
+                if (shuf) attron(COLOR_PAIR(3) | A_BOLD); else attron(COLOR_PAIR(2) | A_DIM);
+                mvaddch(prog_y, ind_x, 'S');
+                if (shuf) attroff(COLOR_PAIR(3) | A_BOLD); else attroff(COLOR_PAIR(2) | A_DIM);
+
+                if (r_mode == REPEAT_ALL) attron(COLOR_PAIR(3) | A_BOLD); else attron(COLOR_PAIR(2) | A_DIM);
+                mvaddch(prog_y, ind_x + 2, 'R');
+                if (r_mode == REPEAT_ALL) attroff(COLOR_PAIR(3) | A_BOLD); else attroff(COLOR_PAIR(2) | A_DIM);
+
+                if (r_mode == REPEAT_ONE) attron(COLOR_PAIR(3) | A_BOLD); else attron(COLOR_PAIR(2) | A_DIM);
+                mvaddch(prog_y, ind_x + 4, '1');
+                if (r_mode == REPEAT_ONE) attroff(COLOR_PAIR(3) | A_BOLD); else attroff(COLOR_PAIR(2) | A_DIM);
+
+                mvprintw(prog_y, x + w - 14, " Vol:%3d%%", atomic_load(&volume));
+            } else if (h == 3) {
+                mvprintw(prog_y, x + w - 12, "Vol:%3d%%", atomic_load(&volume));
+            }
         }
     }
 

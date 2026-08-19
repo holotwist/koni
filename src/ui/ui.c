@@ -3,6 +3,7 @@
 
 #include "ui.h"
 #include "ui_common.h"
+#include "ui_input.h"
 #include "state.h"
 #include "file_list.h"
 #include <ncurses.h>
@@ -20,8 +21,10 @@ static void ui_update_state(void) {
         memset(&ui_cache.fmt, 0, sizeof(ui_cache.fmt));
         ui_cache.filename[0] = '\0';
         
-        if (playing_file_idx >= 0 && playing_file_idx < num_files) {
+        if (!playing_from_playlist && playing_file_idx >= 0 && playing_file_idx < num_files) {
             selected_file_idx = playing_file_idx;
+        } else if (playing_from_playlist && playing_file_idx >= 0 && playing_file_idx < num_playlist_files) {
+            selected_playlist_idx = playing_file_idx;
         }
         ui_cache.idx = playing_file_idx;
         ui_cache.header_loaded_for_idx = -2;
@@ -91,7 +94,11 @@ static void ui_loop(void) {
         int player_w = max_x - info_w;
 
         draw_vis_panel(0, 0, vis_h, max_x);
-        draw_files_panel(vis_h, 0, files_h, max_x);
+        
+        int play_w = max_x / 2;
+        int file_w = max_x - play_w;
+        draw_playlist_panel(vis_h, 0, files_h, play_w);
+        draw_files_panel(vis_h, play_w, files_h, file_w);
         
         if (info_w > 0) draw_info_panel(vis_h + files_h, 0, bottom_h, info_w);
         draw_player_panel(vis_h + files_h, info_w, bottom_h, player_w);
@@ -101,13 +108,19 @@ static void ui_loop(void) {
         int bottom_h = 12;
         int top_h   = max_y - bottom_h;
 
-        draw_files_panel(0, 0, top_h, left_w);
+        int play_h = top_h / 2;
+        int file_h = top_h - play_h;
+        
+        draw_playlist_panel(0, 0, play_h, left_w);
+        draw_files_panel(play_h, 0, file_h, left_w);
         draw_info_panel(top_h, 0, bottom_h, left_w);
         draw_vis_panel(0, left_w, top_h, right_w);
         draw_player_panel(top_h, left_w, bottom_h, right_w);
     }
     refresh();
 }
+
+#include <time.h> // For random seeding
 
 void ui_run(void) {
     initscr(); cbreak(); noecho(); keypad(stdscr, TRUE); curs_set(0); timeout(15); 
@@ -117,75 +130,78 @@ void ui_run(void) {
     init_pair(7, COLOR_CYAN,    -1); init_pair(8, COLOR_GREEN,   -1); init_pair(9,  COLOR_YELLOW,  -1);
     init_pair(10, COLOR_RED,     -1);
 
+    srand(time(NULL));
+
     bool running = true;
     while (running) {
         ui_loop();
-        int ch = getch();
-        if (ch != ERR) force_redraw = true;
-        switch (ch) {
-            case 'q': case 'Q':
-                running = false; atomic_store(&current_cmd_atomic, CMD_QUIT); break;
-            case KEY_UP:
-                if (selected_file_idx > 0) selected_file_idx--;
-                break;
-            case KEY_DOWN:
-                if (selected_file_idx < num_files - 1) selected_file_idx++;
-                break;
-            case KEY_LEFT:
-                if (atomic_load(&play_state_atomic) != STATE_STOPPED) {
-                    int t = atomic_load(&p_current_sec) - 5;
-                    if (t < 0) t = 0;
-                    atomic_store(&seek_target_sec, t);
-                    atomic_store(&current_cmd_atomic, CMD_SEEK);
-                }
-                break;
-            case KEY_RIGHT:
-                if (atomic_load(&play_state_atomic) != STATE_STOPPED) {
-                    int t = atomic_load(&p_current_sec) + 5;
-                    int tot = atomic_load(&p_total_sec);
-                    if (t > tot) t = tot - 1;
-                    if (t < 0) t = 0;
-                    atomic_store(&seek_target_sec, t);
-                    atomic_store(&current_cmd_atomic, CMD_SEEK);
-                }
-                break;
-            case 10: 
-                if (files[selected_file_idx].is_dir) {
-                    char new_path[1024]; snprintf(new_path, sizeof(new_path), "%s/%s", current_dir, files[selected_file_idx].name);
-                    if (chdir(new_path) == 0) { if (getcwd(current_dir, sizeof(current_dir)) != NULL) load_directory("."); }
-                } else {
-                    pthread_mutex_lock(&state_mutex);
-                    snprintf(playing_filepath, sizeof(playing_filepath), "%s/%s", current_dir, files[selected_file_idx].name);
-                    strncpy(playing_filename, files[selected_file_idx].name, 255);
-                    playing_file_idx = selected_file_idx;
-                    pthread_mutex_unlock(&state_mutex);
-                    atomic_store(&current_cmd_atomic, CMD_PLAY);
-                } break;
-            case ' ': case 'p': atomic_store(&current_cmd_atomic, CMD_PAUSE); break;
-            case 'n': case '>': atomic_store(&current_cmd_atomic, CMD_NEXT); break;
-            case 'b': case '<': atomic_store(&current_cmd_atomic, CMD_PREV); break;
-            case '1': active_tab = 1; break;
-            case '2': if (ui_cache.meta.lyrics != NULL) active_tab = 2; break;
-            case 'c': case 'C': if (active_tab == 1) current_vis_mode = (current_vis_mode + 1) % 2; break;
-            case 'f': case 'F': is_fullscreen = !is_fullscreen; break;
-            case '+': case '=': if (atomic_load(&volume) < 200) atomic_fetch_add(&volume, 5); break;
-            case '-': case '_': if (atomic_load(&volume) > 0) atomic_fetch_sub(&volume, 5); break;
-        }
+        
+        // Handle playback (Next, Prev, Auto-advance, Repeat, Shuffle)
         PlayerCommand cmd = atomic_load(&current_cmd_atomic);
-        if (cmd == CMD_NEXT || cmd == CMD_PREV) {
-            int step = (cmd == CMD_NEXT) ? 1 : -1; bool found = false;
+        if (cmd == CMD_NEXT || cmd == CMD_NEXT_AUTO || cmd == CMD_PREV) {
+            int step = (cmd == CMD_PREV) ? -1 : 1;
+            bool found = false;
+            int repeat_mode = atomic_load(&play_mode_repeat);
+            bool shuffle = atomic_load(&play_mode_shuffle);
+            
             pthread_mutex_lock(&state_mutex);
-            for (int i = playing_file_idx + step; i >= 0 && i < num_files; i += step) {
-                if (!files[i].is_dir) {
-                    snprintf(playing_filepath, sizeof(playing_filepath), "%s/%s", current_dir, files[i].name);
-                    strncpy(playing_filename, files[i].name, 255);
-                    playing_file_idx = i;
-                    atomic_store(&current_cmd_atomic, CMD_PLAY);
-                    found = true; break;
+            int total_items = playing_from_playlist ? num_playlist_files : num_files;
+            int next_idx = -1;
+            
+            if (total_items > 0) {
+                if (cmd == CMD_NEXT_AUTO && repeat_mode == REPEAT_ONE) {
+                    next_idx = playing_file_idx; // Play same track again
+                } else if (shuffle && cmd != CMD_PREV) {
+                    next_idx = rand() % total_items;
+                    if (!playing_from_playlist) {
+                        int attempts = 0;
+                        while(files[next_idx].is_dir && attempts < total_items) {
+                            next_idx = (next_idx + 1) % total_items;
+                            attempts++;
+                        }
+                        if (files[next_idx].is_dir) next_idx = -1;
+                    }
+                } else {
+                    next_idx = playing_file_idx + step;
+                    for (int attempts = 0; attempts < total_items; attempts++) {
+                        if (next_idx >= total_items || next_idx < 0) {
+                            if (repeat_mode == REPEAT_ALL) {
+                                next_idx = (step > 0) ? 0 : total_items - 1; // Wrap around
+                            } else {
+                                next_idx = -1; // End of list
+                                break;
+                            }
+                        }
+                        if (playing_from_playlist || !files[next_idx].is_dir) break;
+                        next_idx += step;
+                    }
+                    if (next_idx >= 0 && !playing_from_playlist && files[next_idx].is_dir) next_idx = -1;
                 }
             }
+            
+            if (next_idx >= 0) {
+                if (playing_from_playlist) {
+                    strncpy(playing_filepath, playlist[next_idx].path, sizeof(playing_filepath));
+                    strncpy(playing_filename, playlist[next_idx].name, 255);
+                } else {
+                    snprintf(playing_filepath, sizeof(playing_filepath), "%s/%s", current_dir, files[next_idx].name);
+                    strncpy(playing_filename, files[next_idx].name, 255);
+                }
+                playing_file_idx = next_idx;
+                atomic_store(&current_cmd_atomic, CMD_PLAY);
+                found = true;
+            }
             pthread_mutex_unlock(&state_mutex);
-            if (!found) atomic_store(&current_cmd_atomic, CMD_STOP); 
+            
+            if (!found) atomic_store(&current_cmd_atomic, CMD_STOP);
+        }
+
+        int ch = getch();
+        if (ch != ERR) {
+            force_redraw = true;
+            if (!ui_handle_input(ch)) {
+                running = false;
+            }
         }
     }
     

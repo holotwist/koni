@@ -210,7 +210,7 @@ void *audio_thread_func(void *arg) {
         cmd = atomic_load(&current_cmd_atomic);
         if (atomic_load(&play_state_atomic) == STATE_PLAYING && cmd == CMD_NONE) {
             atomic_store(&play_state_atomic, STATE_STOPPED);
-            atomic_store(&current_cmd_atomic, CMD_NEXT);
+            atomic_store(&current_cmd_atomic, CMD_NEXT_AUTO);
         } else if (cmd == CMD_STOP) {
             atomic_store(&play_state_atomic, STATE_STOPPED);
             atomic_store(&current_cmd_atomic, CMD_NONE);

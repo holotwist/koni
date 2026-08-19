@@ -8,6 +8,7 @@
 
 extern unsigned long ui_frame_counter;
 extern int ui_last_selected_idx;
+extern int ui_last_playlist_idx;
 
 // Cache structs to avoid re-fetching constantly
 typedef struct {
@@ -29,6 +30,7 @@ int utf8_byte_offset_for_suffix(const char *str, int target_width);
 
 // Component draw functions
 void draw_files_panel(int y, int x, int h, int w);
+void draw_playlist_panel(int y, int x, int h, int w);
 void draw_info_panel(int y, int x, int h, int w);
 void draw_vis_panel(int y, int x, int h, int w);
 void draw_player_panel(int y, int x, int h, int w);

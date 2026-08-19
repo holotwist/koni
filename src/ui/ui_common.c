@@ -7,6 +7,7 @@
 
 unsigned long ui_frame_counter = 0;
 int ui_last_selected_idx = -1;
+int ui_last_playlist_idx = -1;
 UICache ui_cache = { .idx = -2, .header_loaded_for_idx = -2 };
 
 int utf8_display_width(const char *str) {
