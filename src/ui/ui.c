@@ -52,7 +52,7 @@ static void ui_update_state(void) {
         force_redraw = true;
     }
 
-    uint32_t target_play_pos = atomic_load(&vis_play_pos);
+    uint32_t target_play_pos = atomic_load(&p_frames_consumed);
     uint32_t srate = atomic_load(&vis_srate);
     if (srate == 0) srate = 44100;
     uint32_t nominal_advance = (srate * 15u) / 1000u;

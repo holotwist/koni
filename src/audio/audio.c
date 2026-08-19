@@ -62,7 +62,7 @@ void *audio_thread_func(void *arg) {
             // Reset metrics
             atomic_store(&p_current_sec, 0); atomic_store(&p_total_sec, 0);
             memset(vis_ring_l, 0, sizeof(vis_ring_l)); memset(vis_ring_r, 0, sizeof(vis_ring_r));
-            atomic_store(&vis_wpos, 0); atomic_store(&vis_play_pos, 0); atomic_store(&p_frames_consumed, 0);
+            atomic_store(&vis_wpos, 0); atomic_store(&p_frames_consumed, 0);
         } else if (cmd == CMD_QUIT) {
             break;
         }
@@ -132,7 +132,7 @@ void *audio_thread_func(void *arg) {
                     if (codec->seek(dec, target_sample)) {
                         samples_played = target_sample;
                         memset(vis_ring_l, 0, sizeof(vis_ring_l)); memset(vis_ring_r, 0, sizeof(vis_ring_r));
-                        atomic_store(&vis_wpos, 0); atomic_store(&vis_play_pos, 0);
+                        atomic_store(&vis_wpos, 0);
                         atomic_store(&p_current_sec, samples_played / fmt.sample_rate);
                         
                         ma_device_stop(&device);
@@ -198,7 +198,6 @@ void *audio_thread_func(void *arg) {
                 }
             }
 
-            atomic_store(&vis_play_pos, atomic_load(&p_frames_consumed));
             samples_played += mix_samples;
             atomic_store(&p_current_sec, samples_played / fmt.sample_rate);
         }

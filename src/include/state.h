@@ -66,7 +66,6 @@ extern bool force_redraw;
 extern float       vis_ring_l[VIS_BUF_SIZE];
 extern float       vis_ring_r[VIS_BUF_SIZE];
 extern atomic_uint vis_wpos;
-extern atomic_uint vis_play_pos;
 extern atomic_uint vis_srate;
 extern atomic_uint p_frames_consumed;
 

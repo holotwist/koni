@@ -32,6 +32,5 @@ bool force_redraw = true;
 float vis_ring_l[VIS_BUF_SIZE] = {0};
 float vis_ring_r[VIS_BUF_SIZE] = {0};
 atomic_uint vis_wpos = 0;
-atomic_uint vis_play_pos = 0;
 atomic_uint vis_srate = 44100;
 atomic_uint p_frames_consumed = 0;
