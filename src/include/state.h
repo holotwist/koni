@@ -83,6 +83,10 @@ extern atomic_int  seek_target_sec;
 extern atomic_int  play_mode_shuffle;
 extern atomic_int  play_mode_repeat;
 
+extern int play_history[256];
+extern int history_len;
+extern int history_idx;
+
 extern atomic_uint p_current_sec;
 extern atomic_uint p_total_sec;
 

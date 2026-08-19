@@ -139,7 +139,6 @@ void ui_run(void) {
         // Handle playback (Next, Prev, Auto-advance, Repeat, Shuffle)
         PlayerCommand cmd = atomic_load(&current_cmd_atomic);
         if (cmd == CMD_NEXT || cmd == CMD_NEXT_AUTO || cmd == CMD_PREV) {
-            int step = (cmd == CMD_PREV) ? -1 : 1;
             bool found = false;
             int repeat_mode = atomic_load(&play_mode_repeat);
             bool shuffle = atomic_load(&play_mode_shuffle);
@@ -149,37 +148,69 @@ void ui_run(void) {
             int next_idx = -1;
             
             if (total_items > 0) {
-                if (cmd == CMD_NEXT_AUTO && repeat_mode == REPEAT_ONE) {
-                    next_idx = playing_file_idx; // Play same track again
-                } else if (shuffle && cmd != CMD_PREV) {
-                    next_idx = rand() % total_items;
-                    if (!playing_from_playlist) {
-                        int attempts = 0;
-                        while(files[next_idx].is_dir && attempts < total_items) {
-                            next_idx = (next_idx + 1) % total_items;
-                            attempts++;
-                        }
-                        if (files[next_idx].is_dir) next_idx = -1;
+                if (history_len == 0 && playing_file_idx >= 0) {
+                    play_history[0] = playing_file_idx;
+                    history_len = 1;
+                    history_idx = 0;
+                }
+
+                if (cmd == CMD_PREV) {
+                    if (history_idx > 0) {
+                        history_idx--;
+                        next_idx = play_history[history_idx];
+                    } else {
+                        // First song in history (or single manual press), just restart it
+                        next_idx = playing_file_idx;
                     }
                 } else {
-                    next_idx = playing_file_idx + step;
-                    for (int attempts = 0; attempts < total_items; attempts++) {
-                        if (next_idx >= total_items || next_idx < 0) {
-                            if (repeat_mode == REPEAT_ALL) {
-                                next_idx = (step > 0) ? 0 : total_items - 1; // Wrap around
+                    // NEXT or NEXT_AUTO
+                    if (cmd == CMD_NEXT_AUTO && repeat_mode == REPEAT_ONE) {
+                        next_idx = playing_file_idx; // Play same track again
+                    } else if (history_idx >= 0 && history_idx < history_len - 1 && cmd == CMD_NEXT) {
+                        // If we scrolled back in history, pressing NEXT moves forward in history!
+                        history_idx++;
+                        next_idx = play_history[history_idx];
+                    } else {
+                        if (shuffle) {
+                            next_idx = rand() % total_items;
+                            if (!playing_from_playlist) {
+                                int attempts = 0;
+                                while(files[next_idx].is_dir && attempts < total_items) {
+                                    next_idx = (next_idx + 1) % total_items;
+                                    attempts++;
+                                }
+                                if (files[next_idx].is_dir) next_idx = -1;
+                            }
+                        } else {
+                            next_idx = playing_file_idx + 1;
+                            for (int attempts = 0; attempts < total_items; attempts++) {
+                                if (next_idx >= total_items) {
+                                    if (repeat_mode == REPEAT_ALL) next_idx = 0; // Wrap around
+                                    else { next_idx = -1; break; } // End of list
+                                }
+                                if (playing_from_playlist || !files[next_idx].is_dir) break;
+                                next_idx++;
+                            }
+                            if (next_idx >= 0 && !playing_from_playlist && files[next_idx].is_dir) next_idx = -1;
+                        }
+
+                        // Add to history if it's a new song
+                        if (next_idx >= 0) {
+                            if (history_len < 256) {
+                                play_history[history_len++] = next_idx;
+                                history_idx = history_len - 1;
                             } else {
-                                next_idx = -1; // End of list
-                                break;
+                                // Shift history array left to make room
+                                memmove(play_history, play_history + 1, sizeof(int) * 255);
+                                play_history[255] = next_idx;
+                                history_idx = 255;
                             }
                         }
-                        if (playing_from_playlist || !files[next_idx].is_dir) break;
-                        next_idx += step;
                     }
-                    if (next_idx >= 0 && !playing_from_playlist && files[next_idx].is_dir) next_idx = -1;
                 }
             }
             
-            if (next_idx >= 0) {
+            if (next_idx >= 0 && next_idx < total_items) {
                 if (playing_from_playlist) {
                     strncpy(playing_filepath, playlist[next_idx].path, sizeof(playing_filepath));
                     strncpy(playing_filename, playlist[next_idx].name, 255);
@@ -190,6 +221,9 @@ void ui_run(void) {
                 playing_file_idx = next_idx;
                 atomic_store(&current_cmd_atomic, CMD_PLAY);
                 found = true;
+            } else if (next_idx >= 0) {
+                // Failsafe if index became invalid due to deletions
+                history_len = 0; history_idx = -1;
             }
             pthread_mutex_unlock(&state_mutex);
             

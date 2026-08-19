@@ -80,6 +80,26 @@ bool ui_handle_input(int ch) {
             }
             break;
             
+        case 'd': case KEY_DC: case KEY_BACKSPACE: case 127:
+            if (current_focus == FOCUS_PLAYLIST && num_playlist_files > 0) {
+                pthread_mutex_lock(&state_mutex);
+                for (int i = selected_playlist_idx; i < num_playlist_files - 1; i++) {
+                    playlist[i] = playlist[i + 1];
+                }
+                num_playlist_files--;
+                
+                if (playing_from_playlist) {
+                    if (playing_file_idx > selected_playlist_idx) playing_file_idx--;
+                    history_len = 0; history_idx = -1; // Invalidate history so indices stay accurate
+                }
+                
+                if (selected_playlist_idx >= num_playlist_files && selected_playlist_idx > 0) {
+                    selected_playlist_idx--;
+                }
+                pthread_mutex_unlock(&state_mutex);
+            }
+            break;
+            
         case 10: // Enter
             if (current_focus == FOCUS_FILES) {
                 if (files[selected_file_idx].is_dir) {
@@ -91,6 +111,7 @@ bool ui_handle_input(int ch) {
                     strncpy(playing_filename, files[selected_file_idx].name, 255);
                     playing_file_idx = selected_file_idx;
                     playing_from_playlist = false;
+                    history_len = 0; history_idx = -1;
                     pthread_mutex_unlock(&state_mutex);
                     atomic_store(&current_cmd_atomic, CMD_PLAY);
                 }
@@ -100,6 +121,7 @@ bool ui_handle_input(int ch) {
                 strncpy(playing_filename, playlist[selected_playlist_idx].name, 255);
                 playing_file_idx = selected_playlist_idx;
                 playing_from_playlist = true;
+                history_len = 0; history_idx = -1;
                 pthread_mutex_unlock(&state_mutex);
                 atomic_store(&current_cmd_atomic, CMD_PLAY);
             }

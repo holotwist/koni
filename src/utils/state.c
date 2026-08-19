@@ -30,6 +30,10 @@ atomic_int seek_target_sec = -1;
 atomic_int play_mode_shuffle = 0;
 atomic_int play_mode_repeat = 0; // 0=Off, 1=All, 2=One
 
+int play_history[256] = {0};
+int history_len = 0;
+int history_idx = -1;
+
 atomic_uint p_current_sec = 0;
 atomic_uint p_total_sec = 0;
 
