@@ -16,6 +16,10 @@ bool ui_handle_input(int ch) {
             atomic_store(&current_cmd_atomic, CMD_QUIT);
             return false;
             
+        case 'h': case 'H':
+            show_help_bar = !show_help_bar;
+            break;
+            
         case '\t':
             current_focus = (current_focus == FOCUS_FILES) ? FOCUS_PLAYLIST : FOCUS_FILES;
             break;
@@ -90,7 +94,7 @@ bool ui_handle_input(int ch) {
                 
                 if (playing_from_playlist) {
                     if (playing_file_idx > selected_playlist_idx) playing_file_idx--;
-                    history_len = 0; history_idx = -1; // Invalidate history so indices stay accurate
+                    history_len = 0; history_idx = -1;
                 }
                 
                 if (selected_playlist_idx >= num_playlist_files && selected_playlist_idx > 0) {
@@ -127,12 +131,22 @@ bool ui_handle_input(int ch) {
             }
             break;
             
-        case 's': case 'S':
-            atomic_store(&play_mode_shuffle, !atomic_load(&play_mode_shuffle));
-            break;
+        case 's': case 'S': atomic_store(&play_mode_shuffle, !atomic_load(&play_mode_shuffle)); break;
         case 'r': case 'R': {
             int r = atomic_load(&play_mode_repeat);
             atomic_store(&play_mode_repeat, (r + 1) % 3);
+            break;
+        }
+        case 'g': case 'G': atomic_store(&play_mode_rgain, !atomic_load(&play_mode_rgain)); break;
+        case 'l': case 'L': force_vertical_layout = !force_vertical_layout; break;
+        case 'm': case 'M': {
+            int cur_vol = atomic_load(&volume);
+            if (cur_vol > 0) {
+                saved_volume = cur_vol;
+                atomic_store(&volume, 0);
+            } else {
+                atomic_store(&volume, saved_volume > 0 ? saved_volume : 100);
+            }
             break;
         }
         case ' ': case 'p': atomic_store(&current_cmd_atomic, CMD_PAUSE); break;

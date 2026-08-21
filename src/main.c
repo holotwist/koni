@@ -7,17 +7,32 @@
 #include <locale.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <string.h>
 #include <pthread.h>
 
 int main(int argc, char **argv) {
+    bool force_colors = false;
+    int dir_idx = -1;
+    
+    // Parse args
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--force-colors") == 0 || strcmp(argv[i], "-f") == 0) {
+            force_colors = true;
+        } else {
+            dir_idx = i;
+        }
+    }
+
     setlocale(LC_ALL, ""); 
-    if (argc > 1) { if (chdir(argv[1]) != 0) perror("chdir failed"); }
+    if (dir_idx != -1) { 
+        if (chdir(argv[dir_idx]) != 0) perror("chdir failed"); 
+    }
     load_directory(".");
     
     pthread_t audio_thread;
     pthread_create(&audio_thread, NULL, audio_thread_func, NULL);
     
-    ui_run();
+    ui_run(force_colors);
     
     pthread_join(audio_thread, NULL);
     koni_metadata_free(&p_metadata);

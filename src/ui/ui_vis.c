@@ -6,7 +6,9 @@
 
 void draw_vis_panel(int y, int x, int h, int w) {
     if (h < 4 || w < 4) return;
-    ui_draw_box(y, x, h, w, is_fullscreen ? (playing_file_idx >= 0 ? ui_cache.filename : "player") : NULL, 1);
+    
+    // Pass NULL for the title so it doesn't collide with the Tabs menu
+    ui_draw_box(y, x, h, w, NULL, 1);
 
     // Tabs Menu
     mvprintw(y, x + 2, " ");
@@ -17,8 +19,6 @@ void draw_vis_panel(int y, int x, int h, int w) {
     if (ui_cache.meta.lyrics != NULL) {
         attron(active_tab == 2 ? A_REVERSE : A_NORMAL); printw("2:lyric"); attroff(active_tab == 2 ? A_REVERSE : A_NORMAL); printw(" ");
     }
-    printw(" -["); attron(COLOR_PAIR(5)); printw("C:Switch Visualizer"); attroff(COLOR_PAIR(5)); printw("] ");
-    printw("-["); attron(COLOR_PAIR(5)); printw(is_fullscreen ? "F:Windowed" : "F:Fullscreen"); attroff(COLOR_PAIR(5)); printw("] ");
 
     int draw_w = w - 4;
     int draw_h = h - 4;

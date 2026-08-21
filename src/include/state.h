@@ -95,6 +95,11 @@ extern int current_vis_mode;
 extern bool is_fullscreen;
 extern bool force_redraw;
 
+extern bool show_help_bar;
+extern bool force_vertical_layout;
+extern int saved_volume;
+extern atomic_int play_mode_rgain;
+
 extern float       vis_ring_l[VIS_BUF_SIZE];
 extern float       vis_ring_r[VIS_BUF_SIZE];
 extern atomic_uint vis_wpos;

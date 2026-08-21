@@ -42,6 +42,11 @@ int current_vis_mode = 0;
 bool is_fullscreen = false;
 bool force_redraw = true;
 
+bool show_help_bar = false;
+bool force_vertical_layout = false;
+int saved_volume = 100;
+atomic_int play_mode_rgain = 0;
+
 float vis_ring_l[VIS_BUF_SIZE] = {0};
 float vis_ring_r[VIS_BUF_SIZE] = {0};
 atomic_uint vis_wpos = 0;

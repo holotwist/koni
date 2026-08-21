@@ -49,7 +49,6 @@ add_executable(koni
     src/ui/ui_animations.c
     src/ui/ui_files.c
     src/ui/ui_playlist.c
-    src/ui/ui_info.c
     src/ui/ui_vis.c
     src/ui/ui_player.c
     src/ui/ui_input.c

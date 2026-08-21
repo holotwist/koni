@@ -1,25 +1,118 @@
 #include "ui_common.h"
 #include "ui_animations.h"
+#include <string.h>
 #include <math.h>
 
 void draw_player_panel(int y, int x, int h, int w) {
     if (h < 3 || w < 10) return;
     ui_draw_box(y, x, h, w, "player", 1);
-    int center_x = x + (w / 2);
+    
+    uint32_t cur_sec = atomic_load(&p_current_sec);
+    uint32_t tot_sec = atomic_load(&p_total_sec);
+    
+    int r_mode = atomic_load(&play_mode_repeat);
+    bool shuf = atomic_load(&play_mode_shuffle);
+    bool rgain = atomic_load(&play_mode_rgain);
+    int vol = atomic_load(&volume);
+    
+    // Title and indicators
+    int line1_y = y + 1;
+    int ind_w = 27; // Space needed for indicators
+    
+    if (w > ind_w + 15) {
+        // Right-aligned indicators
+        int curr_x = x + w - 12;
+        mvprintw(line1_y, curr_x, " Vol:%3d%%", vol);
+        
+        curr_x -= 6;
+        if (rgain) attron(A_REVERSE | COLOR_PAIR(5)); else attron(A_DIM | COLOR_PAIR(2));
+        mvprintw(line1_y, curr_x, " RG ");
+        if (rgain) attroff(A_REVERSE | COLOR_PAIR(5)); else attroff(A_DIM | COLOR_PAIR(2));
+        
+        curr_x -= 5;
+        if (r_mode != REPEAT_OFF) attron(A_REVERSE | COLOR_PAIR(5)); else attron(A_DIM | COLOR_PAIR(2));
+        mvprintw(line1_y, curr_x, (r_mode == REPEAT_ONE) ? " 1 " : " R ");
+        if (r_mode != REPEAT_OFF) attroff(A_REVERSE | COLOR_PAIR(5)); else attroff(A_DIM | COLOR_PAIR(2));
 
-    int vu_y = -1, vol_y = -1, prog_y = -1, title_y = -1;
-    if (h >= 10) {
-        vu_y = y + 3; vol_y = y + 5; prog_y = y + 7; title_y = y + 9;
-    } else if (h >= 6) {
-        vu_y = y + 2; vol_y = y + 3; prog_y = y + 4; title_y = y + 5;
-    } else if (h >= 4) {
-        vu_y = -1; vol_y = y + 1; prog_y = y + 2; title_y = y + 3;
-    } else if (h == 3) {
-        vu_y = -1; vol_y = y + 1; prog_y = y + 1; title_y = -1; // Stack horizontally if extreme crunch
+        curr_x -= 5;
+        if (shuf) attron(A_REVERSE | COLOR_PAIR(5)); else attron(A_DIM | COLOR_PAIR(2));
+        mvprintw(line1_y, curr_x, " S ");
+        if (shuf) attroff(A_REVERSE | COLOR_PAIR(5)); else attroff(A_DIM | COLOR_PAIR(2));
+        
+        // Left-aligned Title
+        const char* prefix = "Playing: ";
+        attron(A_DIM | COLOR_PAIR(2));
+        mvprintw(line1_y, x + 2, "%s", prefix);
+        attroff(A_DIM | COLOR_PAIR(2));
+        
+        int title_start = x + 2 + strlen(prefix);
+        int max_title_w = (curr_x - 1) - title_start;
+        
+        if (max_title_w > 0) {
+            char title_buf[512] = {0};
+            if (ui_cache.meta.title && ui_cache.meta.artist && strlen(ui_cache.meta.title) > 0 && strlen(ui_cache.meta.artist) > 0) {
+                snprintf(title_buf, sizeof(title_buf), "%s by %s", ui_cache.meta.title, ui_cache.meta.artist);
+            } else if (ui_cache.meta.title && strlen(ui_cache.meta.title) > 0) {
+                snprintf(title_buf, sizeof(title_buf), "%s", ui_cache.meta.title);
+            } else if (playing_file_idx >= 0) {
+                snprintf(title_buf, sizeof(title_buf), "%s", ui_cache.filename);
+            } else {
+                snprintf(title_buf, sizeof(title_buf), "<No Song Selected>");
+            }
+            
+            char disp_buf[1024] = {0};
+            get_marquee_text(title_buf, max_title_w, ui_frame_counter, disp_buf, sizeof(disp_buf));
+            
+            attron(A_BOLD | COLOR_PAIR(2));
+            mvprintw(line1_y, title_start, "%s", disp_buf);
+            attroff(A_BOLD | COLOR_PAIR(2));
+        }
     }
-
-    // VU Meter
-    if (vu_y != -1) {
+    
+    // Progress bar
+    if (h >= 4) {
+        int prog_y = y + 2;
+        char time_str[32];
+        snprintf(time_str, sizeof(time_str), "%02u:%02u / %02u:%02u", cur_sec / 60, cur_sec % 60, tot_sec / 60, tot_sec % 60);
+        
+        int time_len = 15; // Width of "00:00 / 00:00"
+        mvprintw(prog_y, x + 2, "%s", time_str);
+        
+        int bar_start = x + 2 + time_len + 1;
+        int bar_w = (x + w - 2) - bar_start;
+        
+        if (bar_w > 2) {
+            float progress = (tot_sec > 0) ? (float)cur_sec / tot_sec : 0.0f;
+            if (progress > 1.0f) progress = 1.0f;
+            
+            int inner_w = bar_w - 2; // Subtract space for [ and ]
+            int filled_w = (int)(progress * inner_w);
+            
+            attron(COLOR_PAIR(2));
+            mvprintw(prog_y, bar_start, "[");
+            
+            attron(COLOR_PAIR(5)); // Magenta highlight
+            for (int i = 0; i < filled_w; i++) {
+                mvprintw(prog_y, bar_start + 1 + i, "\xE2\x96\x88"); // Filled block (█)
+            }
+            attroff(COLOR_PAIR(5));
+            
+            attron(COLOR_PAIR(2) | A_DIM);
+            for (int i = filled_w; i < inner_w; i++) {
+                mvprintw(prog_y, bar_start + 1 + i, "\xE2\x96\x91"); // Dimmed empty block (░)
+            }
+            attroff(A_DIM);
+            
+            mvprintw(prog_y, bar_start + 1 + inner_w, "]");
+            attroff(COLOR_PAIR(2));
+        }
+    }
+    
+    // VU-meter
+    if (h >= 5) {
+        int vu_y = y + 3;
+        int center_x = x + (w / 2);
+        
         uint32_t srate = atomic_load(&vis_srate);
         if (srate == 0) srate = 44100;
         uint32_t vu_window = (srate * 50u) / 1000u; // 50ms window
@@ -78,91 +171,5 @@ void draw_player_panel(int y, int x, int h, int w) {
         if (clip_hold_r > 0) attron(COLOR_PAIR(10) | A_REVERSE);
         mvaddstr(vu_y, center_x + 1 + bar_len, " ");
         if (clip_hold_r > 0) attroff(COLOR_PAIR(10) | A_REVERSE);
-    }
-
-    // Indicators & volume
-    if (vol_y != -1 && h > 3) {
-        int r_mode = atomic_load(&play_mode_repeat);
-        bool shuf = atomic_load(&play_mode_shuffle);
-        
-        if (w >= 22) {
-            int ind_x = x + w - 21; // Position right before volume
-            
-            if (shuf) attron(COLOR_PAIR(3) | A_BOLD); else attron(COLOR_PAIR(2) | A_DIM);
-            mvaddch(vol_y, ind_x, 'S');
-            if (shuf) attroff(COLOR_PAIR(3) | A_BOLD); else attroff(COLOR_PAIR(2) | A_DIM);
-            
-            if (r_mode == REPEAT_ALL) attron(COLOR_PAIR(3) | A_BOLD); else attron(COLOR_PAIR(2) | A_DIM);
-            mvaddch(vol_y, ind_x + 2, 'R');
-            if (r_mode == REPEAT_ALL) attroff(COLOR_PAIR(3) | A_BOLD); else attroff(COLOR_PAIR(2) | A_DIM);
-            
-            if (r_mode == REPEAT_ONE) attron(COLOR_PAIR(3) | A_BOLD); else attron(COLOR_PAIR(2) | A_DIM);
-            mvaddch(vol_y, ind_x + 4, '1');
-            if (r_mode == REPEAT_ONE) attroff(COLOR_PAIR(3) | A_BOLD); else attroff(COLOR_PAIR(2) | A_DIM);
-        }
-        
-        mvprintw(vol_y, x + w - 14, "Vol: %3d%%", atomic_load(&volume));
-    }
-
-    // Progress
-    if (prog_y != -1) {
-        uint32_t cur_sec = atomic_load(&p_current_sec);
-        uint32_t tot_sec = atomic_load(&p_total_sec);
-        
-        int bar_width = w - 18;
-        if (h == 3) bar_width = w - 28; // Leave space for volume horizontally
-
-        if (bar_width > 0) {
-            float progress = (tot_sec > 0) ? (float)cur_sec / (float)tot_sec : 0.0f;
-            if (progress > 1.0f) progress = 1.0f;
-            int pos = (int)(progress * (float)bar_width);
-            mvprintw(prog_y, x + 4, "%02u:%02u ", cur_sec / 60, cur_sec % 60);
-            
-            attron(COLOR_PAIR(5));
-            for (int i = 0; i < bar_width; i++) {
-                if (i < pos) addstr("━"); else if (i == pos) addstr("●"); else addstr("─");
-            }
-            attroff(COLOR_PAIR(5));
-            printw(" %02u:%02u", tot_sec / 60, tot_sec % 60);
-
-            if (h == 3 && w >= 28) {
-                bool shuf = atomic_load(&play_mode_shuffle);
-                int r_mode = atomic_load(&play_mode_repeat);
-                int ind_x = x + w - 22;
-                
-                if (shuf) attron(COLOR_PAIR(3) | A_BOLD); else attron(COLOR_PAIR(2) | A_DIM);
-                mvaddch(prog_y, ind_x, 'S');
-                if (shuf) attroff(COLOR_PAIR(3) | A_BOLD); else attroff(COLOR_PAIR(2) | A_DIM);
-
-                if (r_mode == REPEAT_ALL) attron(COLOR_PAIR(3) | A_BOLD); else attron(COLOR_PAIR(2) | A_DIM);
-                mvaddch(prog_y, ind_x + 2, 'R');
-                if (r_mode == REPEAT_ALL) attroff(COLOR_PAIR(3) | A_BOLD); else attroff(COLOR_PAIR(2) | A_DIM);
-
-                if (r_mode == REPEAT_ONE) attron(COLOR_PAIR(3) | A_BOLD); else attron(COLOR_PAIR(2) | A_DIM);
-                mvaddch(prog_y, ind_x + 4, '1');
-                if (r_mode == REPEAT_ONE) attroff(COLOR_PAIR(3) | A_BOLD); else attroff(COLOR_PAIR(2) | A_DIM);
-
-                mvprintw(prog_y, x + w - 14, " Vol:%3d%%", atomic_load(&volume));
-            } else if (h == 3) {
-                mvprintw(prog_y, x + w - 12, "Vol:%3d%%", atomic_load(&volume));
-            }
-        }
-    }
-
-    // Title
-    if (title_y != -1) {
-        int max_title_w = w - 4;
-        if (max_title_w > 0) {
-            const char *filename_to_show = (playing_file_idx >= 0) ? ui_cache.filename : "<No Song Selected>";
-            char disp_buf[1024] = {0};
-            get_marquee_text(filename_to_show, max_title_w, ui_frame_counter, disp_buf, sizeof(disp_buf));
-            
-            int text_len = utf8_display_width(disp_buf);
-            int txt_start = center_x - (text_len / 2);
-            if (txt_start < x + 2) txt_start = x + 2;
-            
-            mvhline(title_y, x + 2, ' ', max_title_w); // Clear line to prevent ghost characters
-            mvprintw(title_y, txt_start, "%s", disp_buf);
-        }
     }
 }
