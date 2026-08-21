@@ -7,6 +7,7 @@
 #include "codec.h"
 
 extern unsigned long ui_frame_counter;
+extern bool vis_needs_full_redraw;
 extern int ui_last_selected_idx;
 extern int ui_last_playlist_idx;
 

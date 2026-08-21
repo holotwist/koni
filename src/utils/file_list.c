@@ -4,6 +4,7 @@
 #include "file_list.h"
 #include "state.h"
 #include "codec.h"
+#include "ui_common.h"
 #include <dirent.h>
 #include <sys/stat.h>
 #include <string.h>
@@ -25,6 +26,7 @@ void load_directory(const char *path) {
     num_files = 0;
     strcpy(files[num_files].name, "..");
     files[num_files].is_dir = 1;
+    files[num_files].display_width = 2;
     num_files++;
 
     struct dirent *entry;
@@ -40,6 +42,7 @@ void load_directory(const char *path) {
             if (is_dir || koni_is_supported_extension(ext)) {
                 strncpy(files[num_files].name, entry->d_name, 255);
                 files[num_files].is_dir = is_dir;
+                files[num_files].display_width = utf8_display_width(entry->d_name);
                 num_files++;
             }
         }

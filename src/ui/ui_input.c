@@ -36,7 +36,8 @@ bool ui_handle_input(int ch) {
             
         case KEY_LEFT:
             if (atomic_load(&play_state_atomic) != STATE_STOPPED) {
-                int t = atomic_load(&p_current_sec) - 5;
+                int base = (atomic_load(&current_cmd_atomic) == CMD_SEEK) ? atomic_load(&seek_target_sec) : atomic_load(&p_current_sec);
+                int t = base - 5;
                 if (t < 0) t = 0;
                 atomic_store(&seek_target_sec, t);
                 atomic_store(&current_cmd_atomic, CMD_SEEK);
@@ -45,7 +46,8 @@ bool ui_handle_input(int ch) {
             
         case KEY_RIGHT:
             if (atomic_load(&play_state_atomic) != STATE_STOPPED) {
-                int t = atomic_load(&p_current_sec) + 5;
+                int base = (atomic_load(&current_cmd_atomic) == CMD_SEEK) ? atomic_load(&seek_target_sec) : atomic_load(&p_current_sec);
+                int t = base + 5;
                 int tot = atomic_load(&p_total_sec);
                 if (t > tot) t = tot - 1;
                 if (t < 0) t = 0;
@@ -59,6 +61,7 @@ bool ui_handle_input(int ch) {
                 if (!files[selected_file_idx].is_dir && num_playlist_files < MAX_PLAYLIST_FILES) {
                     snprintf(playlist[num_playlist_files].path, sizeof(playlist[0].path), "%s/%s", current_dir, files[selected_file_idx].name);
                     strncpy(playlist[num_playlist_files].name, files[selected_file_idx].name, 255);
+                    playlist[num_playlist_files].display_width = files[selected_file_idx].display_width;
                     num_playlist_files++;
                 }
             }
@@ -70,6 +73,7 @@ bool ui_handle_input(int ch) {
                     if (!files[i].is_dir && num_playlist_files < MAX_PLAYLIST_FILES) {
                         snprintf(playlist[num_playlist_files].path, sizeof(playlist[0].path), "%s/%s", current_dir, files[i].name);
                         strncpy(playlist[num_playlist_files].name, files[i].name, 255);
+                        playlist[num_playlist_files].display_width = files[i].display_width;
                         num_playlist_files++;
                     }
                 }
@@ -137,7 +141,18 @@ bool ui_handle_input(int ch) {
             atomic_store(&play_mode_repeat, (r + 1) % 3);
             break;
         }
-        case 'g': case 'G': atomic_store(&play_mode_rgain, !atomic_load(&play_mode_rgain)); break;
+        case 'g': case 'G': {
+            int current_rg = atomic_load(&play_mode_rgain);
+            if (current_rg == 0) {
+                // If meta not available, jump to Calc
+                atomic_store(&play_mode_rgain, ui_cache.meta.has_track_gain ? 1 : 2);
+            } else if (current_rg == 1) {
+                atomic_store(&play_mode_rgain, ui_cache.meta.has_track_gain ? 2 : 0);
+            } else {
+                atomic_store(&play_mode_rgain, 0);
+            }
+            break;
+        }
         case 'l': case 'L': force_vertical_layout = !force_vertical_layout; break;
         case 'm': case 'M': {
             int cur_vol = atomic_load(&volume);
@@ -154,7 +169,7 @@ bool ui_handle_input(int ch) {
         case 'b': case '<': atomic_store(&current_cmd_atomic, CMD_PREV); break;
         case '1': active_tab = 1; break;
         case '2': if (ui_cache.meta.lyrics != NULL) active_tab = 2; break;
-        case 'c': case 'C': if (active_tab == 1) current_vis_mode = (current_vis_mode + 1) % 2; break;
+        case 'c': case 'C': if (active_tab == 1) current_vis_mode = (current_vis_mode + 1) % 4; break;
         case 'f': case 'F': is_fullscreen = !is_fullscreen; break;
         case '+': case '=': if (atomic_load(&volume) < 200) atomic_fetch_add(&volume, 5); break;
         case '-': case '_': if (atomic_load(&volume) > 0) atomic_fetch_sub(&volume, 5); break;

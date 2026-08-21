@@ -34,13 +34,15 @@ void draw_playlist_panel(int y, int x, int h, int w) {
         else attron(COLOR_PAIR(2));
         
         char disp_buf[1024] = {0};
+        int text_w = playlist[idx].display_width;
+        
         if (idx == selected_playlist_idx && current_focus == FOCUS_PLAYLIST) {
-            get_marquee_text(playlist[idx].name, max_disp_len, ui_frame_counter, disp_buf, sizeof(disp_buf));
+            get_marquee_text(playlist[idx].name, text_w, max_disp_len, ui_frame_counter, disp_buf, sizeof(disp_buf));
         } else {
-            get_marquee_text(playlist[idx].name, max_disp_len, 0, disp_buf, sizeof(disp_buf));
+            get_marquee_text(playlist[idx].name, text_w, max_disp_len, 0, disp_buf, sizeof(disp_buf));
         }
         
-        int chars_copied = utf8_display_width(disp_buf);
+        int chars_copied = (text_w <= max_disp_len) ? text_w : max_disp_len;
         mvprintw(y + i + 1, x + 2, "%s", disp_buf);
         
         for (int p = chars_copied; p < max_disp_len; p++) printw(" ");

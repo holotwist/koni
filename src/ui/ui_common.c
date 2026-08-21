@@ -6,6 +6,7 @@
 #include <stdlib.h>
 
 unsigned long ui_frame_counter = 0;
+bool vis_needs_full_redraw = false;
 int ui_last_selected_idx = -1;
 int ui_last_playlist_idx = -1;
 UICache ui_cache = { .idx = -2, .header_loaded_for_idx = -2 };
@@ -16,6 +17,11 @@ int utf8_display_width(const char *str) {
     mbstate_t state = {0};
     const char *p = str;
     while (*p != '\0') {
+        if ((unsigned char)*p < 128) { // Fast-path for ASCII
+            width++;
+            p++;
+            continue;
+        }
         wchar_t wc;
         size_t len = mbrtowc(&wc, p, MB_CUR_MAX, &state);
         if (len == (size_t)-1 || len == (size_t)-2 || len == 0) {
@@ -37,6 +43,13 @@ int utf8_byte_offset_for_width(const char *str, int target_width) {
     mbstate_t state = {0};
     const char *p = str;
     while (*p != '\0') {
+        if ((unsigned char)*p < 128) { // Fast-path for ASCII
+            if (current_width + 1 > target_width) break;
+            current_width++;
+            p++;
+            byte_offset++;
+            continue;
+        }
         wchar_t wc;
         size_t len = mbrtowc(&wc, p, MB_CUR_MAX, &state);
         if (len == (size_t)-1 || len == (size_t)-2 || len == 0) {
@@ -64,6 +77,12 @@ int utf8_byte_offset_for_suffix(const char *str, int target_width) {
     const char *p = str;
     
     while (*p != '\0' && current_width > target_width) {
+        if ((unsigned char)*p < 128) { // Fast-path for ASCII
+            current_width--;
+            p++;
+            byte_offset++;
+            continue;
+        }
         wchar_t wc;
         size_t len = mbrtowc(&wc, p, MB_CUR_MAX, &state);
         if (len == (size_t)-1 || len == (size_t)-2 || len == 0) {

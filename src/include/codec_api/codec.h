@@ -18,6 +18,8 @@ typedef struct {
     char *artist;
     char *album;
     char *lyrics;
+    bool has_track_gain;
+    float track_gain; // In decibels (dB)
 } KoniMetadata;
 
 // Opaque decoder instance

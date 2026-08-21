@@ -3,6 +3,8 @@
 #include "audio.h"
 #include "ui.h"
 #include "codec.h"
+#include "protocols/mpris.h"
+#include "vis_math.h"
 
 #include <locale.h>
 #include <unistd.h>
@@ -28,13 +30,20 @@ int main(int argc, char **argv) {
         if (chdir(argv[dir_idx]) != 0) perror("chdir failed"); 
     }
     load_directory(".");
+    vis_math_init();
+    
+    // Expose DBus methods and properties
+    mpris_init();
     
     pthread_t audio_thread;
     pthread_create(&audio_thread, NULL, audio_thread_func, NULL);
     
     ui_run(force_colors);
     
+    atomic_store(&current_cmd_atomic, CMD_QUIT);
     pthread_join(audio_thread, NULL);
+    
+    mpris_shutdown();
     koni_metadata_free(&p_metadata);
     return 0;
 }

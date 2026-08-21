@@ -69,6 +69,7 @@ static void ui_loop(void) {
     if (force_redraw) {
         erase();
         force_redraw = false;
+        vis_needs_full_redraw = true;
     }
 
     ui_update_state();
@@ -154,10 +155,12 @@ static void ui_loop(void) {
     }
     
     refresh();
+    vis_needs_full_redraw = false;
 }
 
 void ui_run(bool force_colors) {
-    initscr(); cbreak(); noecho(); keypad(stdscr, TRUE); curs_set(0); timeout(15); 
+    // timeout(25) sets refresh interval to 25ms, 40FPS
+    initscr(); cbreak(); noecho(); keypad(stdscr, TRUE); curs_set(0); timeout(25);
     start_color(); use_default_colors();
     
     if (force_colors && COLORS >= 256) {

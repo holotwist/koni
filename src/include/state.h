@@ -15,11 +15,13 @@
 typedef struct {
     char name[256];
     int is_dir;
+    int display_width;
 } FileEntry;
 
 typedef struct {
     char path[1024];
     char name[256];
+    int display_width;
 } PlaylistEntry;
 
 typedef enum {

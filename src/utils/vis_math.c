@@ -2,6 +2,28 @@
 #include <math.h>
 #include <stdlib.h>
 
+float hann_window[FFT_SIZE];
+static float complex precalc_twiddles[FFT_SIZE];
+static int math_initialized = 0;
+
+void vis_math_init(void) {
+    if (math_initialized) return;
+    for (int i = 0; i < FFT_SIZE; i++) {
+        hann_window[i] = 0.5f * (1.0f - cosf(2.0f * (float)M_PI * i / (FFT_SIZE - 1)));
+    }
+    int idx = 0;
+    for (int len = 2; len <= FFT_SIZE; len <<= 1) {
+        float angle = -2.0f * (float)M_PI / len;
+        float complex wlen = cosf(angle) + I * sinf(angle);
+        float complex w = 1.0f;
+        for (int j = 0; j < len / 2; j++) {
+            precalc_twiddles[idx++] = w;
+            w *= wlen;
+        }
+    }
+    math_initialized = 1;
+}
+
 void compute_fft(float complex *X, int N) {
     for (int i = 1, j = 0; i < N; i++) {
         int bit = N >> 1;
@@ -13,23 +35,23 @@ void compute_fft(float complex *X, int N) {
             X[j] = temp;
         }
     }
+    int idx = 0;
     for (int len = 2; len <= N; len <<= 1) {
-        float angle = -2.0f * (float)M_PI / len;
-        float complex wlen = cosf(angle) + I * sinf(angle);
+        int half_len = len / 2;
         for (int i = 0; i < N; i += len) {
-            float complex w = 1.0f;
-            for (int j = 0; j < len / 2; j++) {
+            for (int j = 0; j < half_len; j++) {
+                float complex w = precalc_twiddles[idx + j];
                 float complex u = X[i + j];
-                float complex v = X[i + j + len / 2] * w;
+                float complex v = X[i + j + half_len] * w;
                 X[i + j] = u + v;
-                X[i + j + len / 2] = u - v;
-                w *= wlen;
+                X[i + j + half_len] = u - v;
             }
         }
+        idx += half_len;
     }
 }
 
-static inline void set_braille_pixel(uint8_t *grid, int draw_w, int draw_h, int px_x, int px_y) {
+void set_braille_pixel(uint8_t *grid, int draw_w, int draw_h, int px_x, int px_y) {
     if (px_x < 0 || px_x >= draw_w * 2 || px_y < 0 || px_y >= draw_h * 4) return;
     int cell_x = px_x / 2;
     int cell_y = px_y / 4;

@@ -4,6 +4,7 @@
 #include "audio.h"
 #include "state.h"
 #include "codec.h"
+#include "replaygain/replaygain.h"
 
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
@@ -114,6 +115,10 @@ void *audio_thread_func(void *arg) {
         int32_t *interleaved = malloc(sizeof(int32_t) * 65536 * fmt.num_channels);
         uint32_t samples_played = 0;
         int exit_loop = 0;
+        
+        RGainState rgain_state;
+        rgain_init(&rgain_state, fmt.sample_rate, fmt.num_channels);
+        rgain_set_meta(&rgain_state, meta.has_track_gain, meta.track_gain);
 
         while (samples_played < fmt.total_samples && !exit_loop) {
             cmd = atomic_load(&current_cmd_atomic);
@@ -131,14 +136,15 @@ void *audio_thread_func(void *arg) {
                     uint64_t target_sample = (uint64_t)target_sec * fmt.sample_rate;
                     if (codec->seek(dec, target_sample)) {
                         samples_played = target_sample;
-                        memset(vis_ring_l, 0, sizeof(vis_ring_l)); memset(vis_ring_r, 0, sizeof(vis_ring_r));
-                        atomic_store(&vis_wpos, 0);
                         atomic_store(&p_current_sec, samples_played / fmt.sample_rate);
+                        atomic_store(&p_frames_consumed, target_sample);
                         
                         ma_device_stop(&device);
-                        ma_pcm_rb_uninit(&ring_buffer);
-                        ma_pcm_rb_init(ma_format_s32, fmt.num_channels, fmt.sample_rate / 2, NULL, NULL, &ring_buffer);
-                        atomic_store(&p_frames_consumed, 0);
+                        ma_pcm_rb_reset(&ring_buffer);
+                        
+                        memset(vis_ring_l, 0, sizeof(vis_ring_l)); 
+                        memset(vis_ring_r, 0, sizeof(vis_ring_r));
+                        
                         ma_device_start(&device); device_active = true;
                     }
                 }
@@ -155,7 +161,11 @@ void *audio_thread_func(void *arg) {
                  break; // EOF
             }
             
-            // Handle volume application
+            // Apply ReplayGain dynamically before volume
+            rgain_set_mode(&rgain_state, (RGainMode)atomic_load(&play_mode_rgain));
+            rgain_process(&rgain_state, interleaved, mix_samples);
+            
+            // Handle Master volume application
             int current_vol = atomic_load(&volume);
             for (uint32_t s = 0; s < mix_samples * fmt.num_channels; s++) {
                 long long val64 = ((long long)interleaved[s] * current_vol) / 100;

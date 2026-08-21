@@ -12,22 +12,28 @@ void draw_player_panel(int y, int x, int h, int w) {
     
     int r_mode = atomic_load(&play_mode_repeat);
     bool shuf = atomic_load(&play_mode_shuffle);
-    bool rgain = atomic_load(&play_mode_rgain);
+    int rgain = (int)atomic_load(&play_mode_rgain);
     int vol = atomic_load(&volume);
     
     // Title and indicators
     int line1_y = y + 1;
-    int ind_w = 27; // Space needed for indicators
+    int ind_w = 32; // Space needed for indicators
     
     if (w > ind_w + 15) {
         // Right-aligned indicators
         int curr_x = x + w - 12;
         mvprintw(line1_y, curr_x, " Vol:%3d%%", vol);
         
-        curr_x -= 6;
-        if (rgain) attron(A_REVERSE | COLOR_PAIR(5)); else attron(A_DIM | COLOR_PAIR(2));
-        mvprintw(line1_y, curr_x, " RG ");
-        if (rgain) attroff(A_REVERSE | COLOR_PAIR(5)); else attroff(A_DIM | COLOR_PAIR(2));
+        curr_x -= 9;
+        int display_rgain = rgain;
+        // If Meta mode, but the song does not have metadata for ReplayGain, just change to Calc
+        if (rgain == 1 && !ui_cache.meta.has_track_gain) display_rgain = 2;
+        
+        if (rgain != 0) attron(A_REVERSE | COLOR_PAIR(5)); else attron(A_DIM | COLOR_PAIR(2));
+        if (display_rgain == 1) mvprintw(line1_y, curr_x, " RG:Meta ");
+        else if (display_rgain == 2) mvprintw(line1_y, curr_x, " RG:Calc ");
+        else mvprintw(line1_y, curr_x, " RG:Off  ");
+        if (rgain != 0) attroff(A_REVERSE | COLOR_PAIR(5)); else attroff(A_DIM | COLOR_PAIR(2));
         
         curr_x -= 5;
         if (r_mode != REPEAT_OFF) attron(A_REVERSE | COLOR_PAIR(5)); else attron(A_DIM | COLOR_PAIR(2));
@@ -61,7 +67,8 @@ void draw_player_panel(int y, int x, int h, int w) {
             }
             
             char disp_buf[1024] = {0};
-            get_marquee_text(title_buf, max_title_w, ui_frame_counter, disp_buf, sizeof(disp_buf));
+            int title_w = utf8_display_width(title_buf); // Safe to call once per frame
+            get_marquee_text(title_buf, title_w, max_title_w, ui_frame_counter, disp_buf, sizeof(disp_buf));
             
             attron(A_BOLD | COLOR_PAIR(2));
             mvprintw(line1_y, title_start, "%s", disp_buf);
@@ -135,15 +142,18 @@ void draw_player_panel(int y, int x, int h, int w) {
         float db_l = (peak_l < 0.001f) ? -60.0f : 20.0f * log10f(peak_l);
         float db_r = (peak_r < 0.001f) ? -60.0f : 20.0f * log10f(peak_r);
         peak_l = (db_l + 40.0f) / 40.0f; peak_r = (db_r + 40.0f) / 40.0f;
-        if (peak_l < 0.0f) peak_l = 0.0f; if (peak_l > 1.0f) peak_l = 1.0f;
-        if (peak_r < 0.0f) peak_r = 0.0f; if (peak_r > 1.0f) peak_r = 1.0f;
+        if (peak_l < 0.0f) peak_l = 0.0f;
+        if (peak_l > 1.0f) peak_l = 1.0f;
+        if (peak_r < 0.0f) peak_r = 0.0f;
+        if (peak_r > 1.0f) peak_r = 1.0f;
 
         static float smooth_peak_l = 0.0f; static float smooth_peak_r = 0.0f;
         if (peak_l > smooth_peak_l) smooth_peak_l = peak_l; else { smooth_peak_l -= 0.03f; if (smooth_peak_l < 0.0f) smooth_peak_l = 0.0f; }
         if (peak_r > smooth_peak_r) smooth_peak_r = peak_r; else { smooth_peak_r -= 0.03f; if (smooth_peak_r < 0.0f) smooth_peak_r = 0.0f; }
 
         int bar_len = (w - 10) / 2;
-        if (bar_len > 24) bar_len = 24; if (bar_len < 5) bar_len = 5;
+        if (bar_len > 24) bar_len = 24;
+        if (bar_len < 5) bar_len = 5;
 
         int val_l = (int)(smooth_peak_l * bar_len); if (val_l > bar_len) val_l = bar_len;
         int val_r = (int)(smooth_peak_r * bar_len); if (val_r > bar_len) val_r = bar_len;

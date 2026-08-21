@@ -5,6 +5,11 @@ set(CMAKE_C_STANDARD 11)
 
 include(CheckCCompilerFlag)
 
+find_package(PkgConfig QUIET)
+if(PKG_CONFIG_FOUND)
+    pkg_check_modules(DBUS QUIET dbus-1)
+endif()
+
 add_compile_options(-O3 -flto -ffast-math -funroll-loops -Wall -Wextra)
 add_compile_definitions(NDEBUG)
 
@@ -36,12 +41,19 @@ else()
     set(DANA_SOURCES "")
 endif()
 
+set(MPRIS_SOURCES "")
+if(DBUS_FOUND)
+    add_compile_definitions(ENABLE_MPRIS)
+    set(MPRIS_SOURCES src/protocols/mpris.c)
+endif()
+
 add_executable(koni
     src/main.c
     src/utils/state.c
     src/utils/file_list.c
     src/utils/vis_math.c
     src/audio/audio.c
+    src/audio/replaygain/replaygain.c
     src/codecs/codec_registry.c
     src/codecs/dana_codec.c
     src/codecs/ma_codec.c
@@ -50,9 +62,15 @@ add_executable(koni
     src/ui/ui_files.c
     src/ui/ui_playlist.c
     src/ui/ui_vis.c
+    src/ui/visualizers/vis_renderer.c
+    src/ui/visualizers/vis_spectrum.c
+    src/ui/visualizers/vis_oscilloscope.c
+    src/ui/visualizers/vis_ellipse.c
+    src/ui/visualizers/vis_lissajous.c
     src/ui/ui_player.c
     src/ui/ui_input.c
     src/ui/ui.c
+    ${MPRIS_SOURCES}
     ${DANA_SOURCES}
 )
 
@@ -60,6 +78,12 @@ target_include_directories(koni PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/codec_api>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/third_party>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/protocols>
 )
 
-target_link_libraries(koni ncursesw pthread m ${CMAKE_DL_LIBS})
+if(DBUS_FOUND)
+    target_include_directories(koni PUBLIC ${DBUS_INCLUDE_DIRS})
+    target_link_libraries(koni ncursesw pthread m ${CMAKE_DL_LIBS} ${DBUS_LIBRARIES})
+else()
+    target_link_libraries(koni ncursesw pthread m ${CMAKE_DL_LIBS})
+endif()
