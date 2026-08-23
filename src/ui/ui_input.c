@@ -9,6 +9,7 @@
 #include <ncurses.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 bool ui_handle_input(int ch) {
     switch (ch) {
@@ -58,8 +59,12 @@ bool ui_handle_input(int ch) {
             
         case 'a':
             if (current_focus == FOCUS_FILES && num_files > 0) {
-                if (!files[selected_file_idx].is_dir && num_playlist_files < MAX_PLAYLIST_FILES) {
-                    snprintf(playlist[num_playlist_files].path, sizeof(playlist[0].path), "%s/%s", current_dir, files[selected_file_idx].name);
+                if (!files[selected_file_idx].is_dir) {
+                    if (num_playlist_files >= playlist_capacity) {
+                        playlist_capacity = playlist_capacity == 0 ? 1024 : playlist_capacity * 2;
+                        playlist = realloc(playlist, sizeof(PlaylistEntry) * playlist_capacity);
+                    }
+                    snprintf(playlist[num_playlist_files].path, sizeof(playlist[num_playlist_files].path), "%s/%s", current_dir, files[selected_file_idx].name);
                     strncpy(playlist[num_playlist_files].name, files[selected_file_idx].name, 255);
                     playlist[num_playlist_files].display_width = files[selected_file_idx].display_width;
                     num_playlist_files++;
@@ -70,8 +75,12 @@ bool ui_handle_input(int ch) {
         case 'A':
             if (current_focus == FOCUS_FILES) {
                 for (int i = 0; i < num_files; i++) {
-                    if (!files[i].is_dir && num_playlist_files < MAX_PLAYLIST_FILES) {
-                        snprintf(playlist[num_playlist_files].path, sizeof(playlist[0].path), "%s/%s", current_dir, files[i].name);
+                    if (!files[i].is_dir) {
+                        if (num_playlist_files >= playlist_capacity) {
+                            playlist_capacity = playlist_capacity == 0 ? 1024 : playlist_capacity * 2;
+                            playlist = realloc(playlist, sizeof(PlaylistEntry) * playlist_capacity);
+                        }
+                        snprintf(playlist[num_playlist_files].path, sizeof(playlist[num_playlist_files].path), "%s/%s", current_dir, files[i].name);
                         strncpy(playlist[num_playlist_files].name, files[i].name, 255);
                         playlist[num_playlist_files].display_width = files[i].display_width;
                         num_playlist_files++;

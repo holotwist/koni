@@ -19,6 +19,7 @@ typedef struct {
     char filename[256];
     uint32_t smooth_rpos;
     int header_loaded_for_idx;
+    char filepath[1024];
 } UICache;
 
 extern UICache ui_cache;

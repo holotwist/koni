@@ -20,6 +20,14 @@ static void append_variant_string(DBusMessageIter *iter, const char *val)
     dbus_message_iter_close_container(iter, &variant);
 }
 
+static void append_variant_object_path(DBusMessageIter *iter, const char *val)
+{
+    DBusMessageIter variant;
+    dbus_message_iter_open_container(iter, DBUS_TYPE_VARIANT, "o", &variant);
+    dbus_message_iter_append_basic(&variant, DBUS_TYPE_OBJECT_PATH, &val);
+    dbus_message_iter_close_container(iter, &variant);
+}
+
 static void append_variant_double(DBusMessageIter *iter, double val)
 {
     DBusMessageIter variant;
@@ -44,62 +52,86 @@ static void append_metadata_variant(DBusMessageIter *iter)
 
     pthread_mutex_lock(&state_mutex);
 
-    dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY, NULL, &dict_entry);
-    const char *track_id_key = "mpris:trackid";
-    const char *track_id_val = "/org/mpris/MediaPlayer2/TrackList/NoTrack";
-    dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &track_id_key);
-    append_variant_string(&dict_entry, track_id_val);
-    dbus_message_iter_close_container(&dict, &dict_entry);
+    int track_id = atomic_load(&current_track_id);
+    if (track_id > 0 && playing_file_idx >= 0)
+    {
+        char track_path[128];
+        snprintf(track_path, sizeof(track_path), "/org/mpris/MediaPlayer2/Track/%d", track_id);
+        const char *track_id_key = "mpris:trackid";
+        const char *track_id_val = track_path;
 
-    uint32_t length_sec = atomic_load(&p_total_sec);
-    if (length_sec > 0)
-    {
         dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY, NULL, &dict_entry);
-        const char *length_key = "mpris:length";
-        int64_t length_us = (int64_t)length_sec * 1000000LL;
-        dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &length_key);
-        append_variant_int64(&dict_entry, length_us);
+        dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &track_id_key);
+        append_variant_object_path(&dict_entry, track_id_val);
         dbus_message_iter_close_container(&dict, &dict_entry);
-    }
 
-    if (p_metadata.title && strlen(p_metadata.title) > 0)
-    {
-        dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY, NULL, &dict_entry);
-        const char *title_key = "xesam:title";
-        dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &title_key);
-        append_variant_string(&dict_entry, p_metadata.title);
-        dbus_message_iter_close_container(&dict, &dict_entry);
-    }
-    else if (playing_file_idx >= 0)
-    {
-        char title_no_ext[256];
-        strncpy(title_no_ext, playing_filename, sizeof(title_no_ext) - 1);
-        title_no_ext[sizeof(title_no_ext) - 1] = '\0';
-        
-        // Find the last dot and truncate the string to remove the extension
-        char *dot = strrchr(title_no_ext, '.');
-        if (dot && dot != title_no_ext) {
-            *dot = '\0';
+        uint32_t length_sec = atomic_load(&p_total_sec);
+        if (length_sec > 0)
+        {
+            dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY, NULL, &dict_entry);
+            const char *length_key = "mpris:length";
+            int64_t length_us = (int64_t)length_sec * 1000000LL;
+            dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &length_key);
+            append_variant_int64(&dict_entry, length_us);
+            dbus_message_iter_close_container(&dict, &dict_entry);
         }
-        
-        dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY, NULL, &dict_entry);
-        const char *title_key = "xesam:title";
-        dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &title_key);
-        append_variant_string(&dict_entry, title_no_ext);
-        dbus_message_iter_close_container(&dict, &dict_entry);
-    }
 
-    if (p_metadata.artist && strlen(p_metadata.artist) > 0)
+        if (p_metadata.title && strlen(p_metadata.title) > 0)
+        {
+            dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY, NULL, &dict_entry);
+            const char *title_key = "xesam:title";
+            dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &title_key);
+            append_variant_string(&dict_entry, p_metadata.title);
+            dbus_message_iter_close_container(&dict, &dict_entry);
+        }
+        else
+        {
+            char title_no_ext[256];
+            strncpy(title_no_ext, playing_filename, sizeof(title_no_ext) - 1);
+            title_no_ext[sizeof(title_no_ext) - 1] = '\0';
+            
+            char *dot = strrchr(title_no_ext, '.');
+            if (dot && dot != title_no_ext) {
+                *dot = '\0';
+            }
+            
+            dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY, NULL, &dict_entry);
+            const char *title_key = "xesam:title";
+            dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &title_key);
+            append_variant_string(&dict_entry, title_no_ext);
+            dbus_message_iter_close_container(&dict, &dict_entry);
+        }
+
+        if (p_metadata.artist && strlen(p_metadata.artist) > 0)
+        {
+            dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY, NULL, &dict_entry);
+            const char *artist_key = "xesam:artist";
+            dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &artist_key);
+            DBusMessageIter artist_var, artist_arr;
+            dbus_message_iter_open_container(&dict_entry, DBUS_TYPE_VARIANT, "as", &artist_var);
+            dbus_message_iter_open_container(&artist_var, DBUS_TYPE_ARRAY, "s", &artist_arr);
+            dbus_message_iter_append_basic(&artist_arr, DBUS_TYPE_STRING, &p_metadata.artist);
+            dbus_message_iter_close_container(&artist_var, &artist_arr);
+            dbus_message_iter_close_container(&dict_entry, &artist_var);
+            dbus_message_iter_close_container(&dict, &dict_entry);
+        }
+
+        if (p_metadata.album && strlen(p_metadata.album) > 0)
+        {
+            dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY, NULL, &dict_entry);
+            const char *album_key = "xesam:album";
+            dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &album_key);
+            append_variant_string(&dict_entry, p_metadata.album);
+            dbus_message_iter_close_container(&dict, &dict_entry);
+        }
+    }
+    else
     {
         dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY, NULL, &dict_entry);
-        const char *artist_key = "xesam:artist";
-        dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &artist_key);
-        DBusMessageIter artist_var, artist_arr;
-        dbus_message_iter_open_container(&dict_entry, DBUS_TYPE_VARIANT, "as", &artist_var);
-        dbus_message_iter_open_container(&artist_var, DBUS_TYPE_ARRAY, "s", &artist_arr);
-        dbus_message_iter_append_basic(&artist_arr, DBUS_TYPE_STRING, &p_metadata.artist);
-        dbus_message_iter_close_container(&artist_var, &artist_arr);
-        dbus_message_iter_close_container(&dict_entry, &artist_var);
+        const char *track_id_key = "mpris:trackid";
+        const char *track_id_val = "/org/mpris/MediaPlayer2/TrackList/NoTrack";
+        dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &track_id_key);
+        append_variant_object_path(&dict_entry, track_id_val);
         dbus_message_iter_close_container(&dict, &dict_entry);
     }
 
@@ -116,6 +148,89 @@ static DBusHandlerResult mpris_handle_methods(DBusConnection *conn, DBusMessage 
     if (!path || strcmp(path, "/org/mpris/MediaPlayer2") != 0)
     {
         return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+    }
+
+    if (dbus_message_is_method_call(msg, "org.freedesktop.DBus.Introspectable", "Introspect"))
+    {
+        const char *xml =
+            "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n"
+            "\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n"
+            "<node>\n"
+            "  <interface name=\"org.freedesktop.DBus.Introspectable\">\n"
+            "    <method name=\"Introspect\">\n"
+            "      <arg name=\"xml_data\" type=\"s\" direction=\"out\"/>\n"
+            "    </method>\n"
+            "  </interface>\n"
+            "  <interface name=\"org.freedesktop.DBus.Properties\">\n"
+            "    <method name=\"Get\">\n"
+            "      <arg name=\"interface_name\" type=\"s\" direction=\"in\"/>\n"
+            "      <arg name=\"property_name\" type=\"s\" direction=\"in\"/>\n"
+            "      <arg name=\"value\" type=\"v\" direction=\"out\"/>\n"
+            "    </method>\n"
+            "    <method name=\"GetAll\">\n"
+            "      <arg name=\"interface_name\" type=\"s\" direction=\"in\"/>\n"
+            "      <arg name=\"properties\" type=\"a{sv}\" direction=\"out\"/>\n"
+            "    </method>\n"
+            "    <method name=\"Set\">\n"
+            "      <arg name=\"interface_name\" type=\"s\" direction=\"in\"/>\n"
+            "      <arg name=\"property_name\" type=\"s\" direction=\"in\"/>\n"
+            "      <arg name=\"value\" type=\"v\" direction=\"in\"/>\n"
+            "    </method>\n"
+            "    <signal name=\"PropertiesChanged\">\n"
+            "      <arg name=\"interface_name\" type=\"s\"/>\n"
+            "      <arg name=\"changed_properties\" type=\"a{sv}\"/>\n"
+            "      <arg name=\"invalidated_properties\" type=\"as\"/>\n"
+            "    </signal>\n"
+            "  </interface>\n"
+            "  <interface name=\"org.mpris.MediaPlayer2\">\n"
+            "    <property name=\"CanQuit\" type=\"b\" access=\"read\"/>\n"
+            "    <property name=\"CanRaise\" type=\"b\" access=\"read\"/>\n"
+            "    <property name=\"HasTrackList\" type=\"b\" access=\"read\"/>\n"
+            "    <property name=\"Identity\" type=\"s\" access=\"read\"/>\n"
+            "  </interface>\n"
+            "  <interface name=\"org.mpris.MediaPlayer2.Player\">\n"
+            "    <method name=\"Next\"/>\n"
+            "    <method name=\"Previous\"/>\n"
+            "    <method name=\"Pause\"/>\n"
+            "    <method name=\"PlayPause\"/>\n"
+            "    <method name=\"Stop\"/>\n"
+            "    <method name=\"Play\"/>\n"
+            "    <method name=\"Seek\">\n"
+            "      <arg name=\"Offset\" type=\"x\" direction=\"in\"/>\n"
+            "    </method>\n"
+            "    <method name=\"SetPosition\">\n"
+            "      <arg name=\"TrackId\" type=\"o\" direction=\"in\"/>\n"
+            "      <arg name=\"Position\" type=\"x\" direction=\"in\"/>\n"
+            "    </method>\n"
+            "    <signal name=\"Seeked\">\n"
+            "      <arg name=\"Position\" type=\"x\"/>\n"
+            "    </signal>\n"
+            "    <property name=\"PlaybackStatus\" type=\"s\" access=\"read\"/>\n"
+            "    <property name=\"LoopStatus\" type=\"s\" access=\"readwrite\"/>\n"
+            "    <property name=\"Rate\" type=\"d\" access=\"readwrite\"/>\n"
+            "    <property name=\"Shuffle\" type=\"b\" access=\"readwrite\"/>\n"
+            "    <property name=\"Metadata\" type=\"a{sv}\" access=\"read\"/>\n"
+            "    <property name=\"Volume\" type=\"d\" access=\"readwrite\"/>\n"
+            "    <property name=\"Position\" type=\"x\" access=\"read\"/>\n"
+            "    <property name=\"MinimumRate\" type=\"d\" access=\"read\"/>\n"
+            "    <property name=\"MaximumRate\" type=\"d\" access=\"read\"/>\n"
+            "    <property name=\"CanControl\" type=\"b\" access=\"read\"/>\n"
+            "    <property name=\"CanPlay\" type=\"b\" access=\"read\"/>\n"
+            "    <property name=\"CanPause\" type=\"b\" access=\"read\"/>\n"
+            "    <property name=\"CanGoNext\" type=\"b\" access=\"read\"/>\n"
+            "    <property name=\"CanGoPrevious\" type=\"b\" access=\"read\"/>\n"
+            "    <property name=\"CanSeek\" type=\"b\" access=\"read\"/>\n"
+            "  </interface>\n"
+            "</node>\n";
+
+        DBusMessage *reply = dbus_message_new_method_return(msg);
+        if (reply)
+        {
+            dbus_message_append_args(reply, DBUS_TYPE_STRING, &xml, DBUS_TYPE_INVALID);
+            dbus_connection_send(conn, reply, NULL);
+            dbus_message_unref(reply);
+        }
+        return DBUS_HANDLER_RESULT_HANDLED;
     }
 
     if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Player", "PlayPause"))
@@ -463,6 +578,16 @@ static DBusHandlerResult mpris_handle_methods(DBusConnection *conn, DBusMessage 
                 atomic_store(&play_mode_shuffle, val ? 1 : 0);
                 force_redraw = true;
             }
+            else if (strcmp(prop, "Volume") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_DOUBLE)
+            {
+                double val;
+                dbus_message_iter_get_basic(&variant, &val);
+                int v = (int)(val * 100.0);
+                if (v < 0) v = 0;
+                if (v > 200) v = 200;
+                atomic_store(&volume, v);
+                force_redraw = true;
+            }
         }
 
         DBusMessage *reply = dbus_message_new_method_return(msg);
@@ -490,6 +615,14 @@ static DBusHandlerResult mpris_handle_methods(DBusConnection *conn, DBusMessage 
 static void *mpris_thread_func(void *arg)
 {
     (void)arg;
+    
+    // Do not register on DBus until the user plays a song
+    while (mpris_running && atomic_load(&current_track_id) == 0) {
+        usleep(100000);
+    }
+    
+    if (!mpris_running) return NULL;
+
     DBusError err;
     dbus_error_init(&err);
 
@@ -519,7 +652,7 @@ static void *mpris_thread_func(void *arg)
     dbus_connection_add_filter(dbus_conn, mpris_handle_methods, NULL, NULL);
 
     PlayState last_state = STATE_STOPPED;
-    int last_file_idx = -1;
+    int last_track = -1;
     int last_repeat = -1;
     int last_shuffle = -1;
 
@@ -529,7 +662,7 @@ static void *mpris_thread_func(void *arg)
         dbus_connection_read_write_dispatch(dbus_conn, 100);
 
         PlayState current_state = atomic_load(&play_state_atomic);
-        int current_idx = atomic_load(&header_ready_for_idx);
+        int current_track = atomic_load(&current_track_id);
         int current_repeat = atomic_load(&play_mode_repeat);
         int current_shuffle = atomic_load(&play_mode_shuffle);
 
@@ -550,16 +683,16 @@ static void *mpris_thread_func(void *arg)
         last_pos_us = current_pos_us;
 
         // Detects changes internally to broadcast properties
-        if (current_state != last_state || current_idx != last_file_idx ||
+        if (current_state != last_state || current_track != last_track ||
             current_repeat != last_repeat || current_shuffle != last_shuffle)
         {
 
-            bool state_changed = (current_state != last_state || current_idx != last_file_idx);
+            bool state_changed = (current_state != last_state || current_track != last_track);
             bool repeat_changed = (current_repeat != last_repeat);
             bool shuffle_changed = (current_shuffle != last_shuffle);
 
             last_state = current_state;
-            last_file_idx = current_idx;
+            last_track = current_track;
             last_repeat = current_repeat;
             last_shuffle = current_shuffle;
 

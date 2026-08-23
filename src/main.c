@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <pthread.h>
+#include <stdlib.h>
 
 int main(int argc, char **argv) {
     bool force_colors = false;
@@ -26,9 +27,19 @@ int main(int argc, char **argv) {
     }
 
     setlocale(LC_ALL, ""); 
+    load_state(); // Load all the previous state
+
     if (dir_idx != -1) { 
         if (chdir(argv[dir_idx]) != 0) perror("chdir failed"); 
+    } else if (current_dir[0] != '\0') {
+        if (chdir(current_dir) != 0) perror("chdir to saved dir failed");
     }
+    
+    // Update current_dir with absolute path if successful
+    if (getcwd(current_dir, sizeof(current_dir)) == NULL) {
+        strncpy(current_dir, ".", sizeof(current_dir));
+    }
+
     load_directory(".");
     vis_math_init();
     
@@ -44,6 +55,13 @@ int main(int argc, char **argv) {
     pthread_join(audio_thread, NULL);
     
     mpris_shutdown();
+    save_state(); // Dump state before exiting
+    
     koni_metadata_free(&p_metadata);
+    
+    // Free dynamically allocated arrays
+    if (files) free(files);
+    if (playlist) free(playlist);
+    
     return 0;
 }

@@ -24,13 +24,22 @@ void load_directory(const char *path) {
     if (!dir) return;
 
     num_files = 0;
+    if (files_capacity == 0) {
+        files_capacity = 1024;
+        files = malloc(sizeof(FileEntry) * files_capacity);
+    }
+    
     strcpy(files[num_files].name, "..");
     files[num_files].is_dir = 1;
     files[num_files].display_width = 2;
     num_files++;
 
     struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL && num_files < MAX_FILES) {
+    while ((entry = readdir(dir)) != NULL) {
+        if (num_files >= files_capacity) {
+            files_capacity *= 2;
+            files = realloc(files, sizeof(FileEntry) * files_capacity);
+        }
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
         char full_path[1024];
         snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);

@@ -16,7 +16,7 @@ static void ui_update_state(void) {
     ui_frame_counter++;
 
     pthread_mutex_lock(&state_mutex);
-    if (playing_file_idx != ui_cache.idx) {
+    if (playing_file_idx != ui_cache.idx || strncmp(playing_filepath, ui_cache.filepath, sizeof(ui_cache.filepath)) != 0) {
         koni_metadata_free(&ui_cache.meta);
         memset(&ui_cache.meta, 0, sizeof(ui_cache.meta));
         memset(&ui_cache.fmt, 0, sizeof(ui_cache.fmt));
@@ -28,6 +28,8 @@ static void ui_update_state(void) {
             selected_playlist_idx = playing_file_idx;
         }
         ui_cache.idx = playing_file_idx;
+        strncpy(ui_cache.filepath, playing_filepath, sizeof(ui_cache.filepath) - 1);
+        ui_cache.filepath[sizeof(ui_cache.filepath) - 1] = '\0';
         ui_cache.header_loaded_for_idx = -2;
         force_redraw = true;
     }
@@ -192,93 +194,6 @@ void ui_run(bool force_colors) {
     bool running = true;
     while (running) {
         ui_loop();
-        
-        PlayerCommand cmd = atomic_load(&current_cmd_atomic);
-        if (cmd == CMD_NEXT || cmd == CMD_NEXT_AUTO || cmd == CMD_PREV) {
-            bool found = false;
-            int repeat_mode = atomic_load(&play_mode_repeat);
-            bool shuffle = atomic_load(&play_mode_shuffle);
-            
-            pthread_mutex_lock(&state_mutex);
-            int total_items = playing_from_playlist ? num_playlist_files : num_files;
-            int next_idx = -1;
-            
-            if (total_items > 0) {
-                if (history_len == 0 && playing_file_idx >= 0) {
-                    play_history[0] = playing_file_idx;
-                    history_len = 1;
-                    history_idx = 0;
-                }
-
-                if (cmd == CMD_PREV) {
-                    if (history_idx > 0) {
-                        history_idx--;
-                        next_idx = play_history[history_idx];
-                    } else {
-                        next_idx = playing_file_idx;
-                    }
-                } else {
-                    if (cmd == CMD_NEXT_AUTO && repeat_mode == REPEAT_ONE) {
-                        next_idx = playing_file_idx;
-                    } else if (history_idx >= 0 && history_idx < history_len - 1 && cmd == CMD_NEXT) {
-                        history_idx++;
-                        next_idx = play_history[history_idx];
-                    } else {
-                        if (shuffle) {
-                            next_idx = rand() % total_items;
-                            if (!playing_from_playlist) {
-                                int attempts = 0;
-                                while(files[next_idx].is_dir && attempts < total_items) {
-                                    next_idx = (next_idx + 1) % total_items;
-                                    attempts++;
-                                }
-                                if (files[next_idx].is_dir) next_idx = -1;
-                            }
-                        } else {
-                            next_idx = playing_file_idx + 1;
-                            for (int attempts = 0; attempts < total_items; attempts++) {
-                                if (next_idx >= total_items) {
-                                    if (repeat_mode == REPEAT_ALL) next_idx = 0;
-                                    else { next_idx = -1; break; }
-                                }
-                                if (playing_from_playlist || !files[next_idx].is_dir) break;
-                                next_idx++;
-                            }
-                            if (next_idx >= 0 && !playing_from_playlist && files[next_idx].is_dir) next_idx = -1;
-                        }
-
-                        if (next_idx >= 0) {
-                            if (history_len < 256) {
-                                play_history[history_len++] = next_idx;
-                                history_idx = history_len - 1;
-                            } else {
-                                memmove(play_history, play_history + 1, sizeof(int) * 255);
-                                play_history[255] = next_idx;
-                                history_idx = 255;
-                            }
-                        }
-                    }
-                }
-            }
-            
-            if (next_idx >= 0 && next_idx < total_items) {
-                if (playing_from_playlist) {
-                    strncpy(playing_filepath, playlist[next_idx].path, sizeof(playing_filepath));
-                    strncpy(playing_filename, playlist[next_idx].name, 255);
-                } else {
-                    snprintf(playing_filepath, sizeof(playing_filepath), "%s/%s", current_dir, files[next_idx].name);
-                    strncpy(playing_filename, files[next_idx].name, 255);
-                }
-                playing_file_idx = next_idx;
-                atomic_store(&current_cmd_atomic, CMD_PLAY);
-                found = true;
-            } else if (next_idx >= 0) {
-                history_len = 0; history_idx = -1;
-            }
-            pthread_mutex_unlock(&state_mutex);
-            
-            if (!found) atomic_store(&current_cmd_atomic, CMD_STOP);
-        }
 
         int ch = getch();
         if (ch != ERR) {

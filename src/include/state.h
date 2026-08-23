@@ -9,8 +9,6 @@
 #define VIS_BUF_SIZE  65536u
 #define VIS_BUF_MASK  (VIS_BUF_SIZE - 1u)
 #define FFT_SIZE      1024
-#define MAX_FILES     1024
-#define MAX_PLAYLIST_FILES 4096
 
 typedef struct {
     char name[256];
@@ -57,16 +55,21 @@ typedef enum {
 extern pthread_mutex_t state_mutex;
 
 extern char current_dir[1024];
-extern FileEntry files[MAX_FILES];
+extern FileEntry *files;
 extern int num_files;
+extern int files_capacity;
 extern int selected_file_idx;
 extern int scroll_offset;
 
-extern PlaylistEntry playlist[MAX_PLAYLIST_FILES];
+extern PlaylistEntry *playlist;
 extern int num_playlist_files;
+extern int playlist_capacity;
 extern int selected_playlist_idx;
 extern int playlist_scroll_offset;
 extern bool playing_from_playlist;
+
+void load_state(void);
+void save_state(void);
 
 extern UIFocus current_focus;
 
@@ -80,6 +83,7 @@ extern KoniMetadata p_metadata;
 extern atomic_int  header_ready_for_idx;
 extern atomic_int  play_state_atomic;
 extern atomic_int  current_cmd_atomic;
+extern atomic_int  current_track_id;
 extern atomic_int  volume;
 extern atomic_int  seek_target_sec;
 extern atomic_int  play_mode_shuffle;
@@ -107,5 +111,7 @@ extern float       vis_ring_r[VIS_BUF_SIZE];
 extern atomic_uint vis_wpos;
 extern atomic_uint vis_srate;
 extern atomic_uint p_frames_consumed;
+
+bool player_advance_track(PlayerCommand cmd);
 
 #endif // PLAYER_STATE_H
