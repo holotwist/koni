@@ -7,7 +7,7 @@ extern const KoniLyricsPlugin ttml_lyrics_plugin;
 
 static const KoniLyricsPlugin* available_plugins[] = {
     &lrc_lyrics_plugin,
-    &ttml_lyrics_plugin,
+    &ttml_lyrics_plugin, // future
     NULL
 };
 

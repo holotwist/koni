@@ -72,7 +72,7 @@ void draw_vis_panel(int y, int x, int h, int w) {
             uint32_t srate = atomic_load(&vis_srate);
             if (srate > 0) current_ms = (uint32_t)(((uint64_t)ui_cache.smooth_rpos * 1000) / srate);
             
-            int active_idx = lrc_get_active_line(ui_cache.lrc_doc, current_ms);
+            int active_idx = lyric_document_get_active_line(ui_cache.lrc_doc, current_ms);
             
             int visible_lines = draw_h;
             int scroll = 0;

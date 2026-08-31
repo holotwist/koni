@@ -54,11 +54,14 @@ add_executable(koni
     src/utils/state.c
     src/utils/file_list.c
     src/utils/vis_math.c
-    src/utils/lrc/lrc.c
+    src/lyrics/lyrics_engine.c
+    src/lyrics/lyrics_registry.c
+    src/lyrics/lrc_plugin/lrc_parser.c
+    src/lyrics/lrc_plugin/lrc_net.c
+    src/lyrics/ttml_plugin/ttml_plugin.c
     src/audio/audio.c
     src/audio/replaygain/replaygain.c
     src/utils/config_manager/config.c
-    src/utils/lrc/lrc_net.c
     src/codecs/codec_registry.c
     src/codecs/dana_codec/dana_codec.c
     src/codecs/dana_codec/metadata.c
@@ -85,6 +88,7 @@ add_executable(koni
 target_include_directories(koni PUBLIC 
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/codec_api>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/lyrics_api>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/third_party>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/protocols>
 )

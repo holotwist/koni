@@ -17,7 +17,7 @@ void draw_lrc_overlay(int y, int x, int h, int w) {
     if (srate == 0) return;
 
     uint32_t current_ms = (uint32_t)(((uint64_t)ui_cache.smooth_rpos * 1000) / srate);
-    int active_line_idx = lrc_get_active_line(ui_cache.lrc_doc, current_ms);
+    int active_line_idx = lyric_document_get_active_line(ui_cache.lrc_doc, current_ms);
 
     if (active_line_idx >= 0) {
         const char* text = ui_cache.lrc_doc->lines[active_line_idx].text;

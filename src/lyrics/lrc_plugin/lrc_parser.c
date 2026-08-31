@@ -1,39 +1,40 @@
-#include "lrc.h"
+#define _DEFAULT_SOURCE
+#define _XOPEN_SOURCE 600
+
+#include "lyrics.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static int compare_lrc(const void* a, const void* b) {
-    const LrcLine* la = (const LrcLine*)a;
-    const LrcLine* lb = (const LrcLine*)b;
-    if (la->time_ms < lb->time_ms) return -1;
-    if (la->time_ms > lb->time_ms) return 1;
+static int compare_lines(const void *a, const void *b) {
+    const LyricLine *la = (const LyricLine*)a;
+    const LyricLine *lb = (const LyricLine*)b;
+    if (la->start_ms < lb->start_ms) return -1;
+    if (la->start_ms > lb->start_ms) return 1;
     return 0;
 }
 
-LrcDocument* lrc_parse(const char* lyrics) {
-    if (!lyrics) return NULL;
-    
-    char* copy = strdup(lyrics);
-    // Erase carriage returns
-    for (char* c = copy; *c; c++) if (*c == '\r') *c = ' ';
+LyricDocument* lrc_parse_document(const char *raw_data, size_t len) {
+    (void)len;
+    if (!raw_data) return NULL;
 
-    LrcDocument* doc = calloc(1, sizeof(LrcDocument));
-    char* line = strtok(copy, "\n");
+    char *copy = strdup(raw_data);
+    for (char *c = copy; *c; c++) if (*c == '\r') *c = ' ';
+
+    LyricDocument *doc = lyric_document_create();
+    strncpy(doc->format_name, "LRC", sizeof(doc->format_name) - 1);
+    char *line = strtok(copy, "\n");
     int valid_lines = 0;
-    
+
     while (line) {
-        char* p = line;
-        while (*p == ' ' || *p == '\t') p++; // Trim leading whitespace
-        
-        char* text_start = p;
+        char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        char *text_start = p;
         int has_tag = 0;
-        
-        // Identify if this line has valid timestamp tags (dry-run)
+
         while (*text_start == '[') {
             int m; float s_f; int bytes_read;
             int s_int, cs_int;
-            
             if (sscanf(text_start, "[%d:%f]%n", &m, &s_f, &bytes_read) == 2) {
                 has_tag = 1; text_start += bytes_read;
             } else if (sscanf(text_start, "[%d:%d:%d]%n", &m, &s_int, &cs_int, &bytes_read) == 3) {
@@ -42,13 +43,11 @@ LrcDocument* lrc_parse(const char* lyrics) {
                 break;
             }
         }
-        
+
         if (has_tag) {
-            // Trim leading spaces from the payload
             while (*text_start == ' ' || *text_start == '\t') text_start++;
-            char* text = strdup(text_start);
-            
-            // Register all timestamps linked to this text payload (second pass)
+            char *text = strdup(text_start);
+
             p = line;
             while (*p == ' ' || *p == '\t') p++;
             while (*p == '[') {
@@ -56,7 +55,7 @@ LrcDocument* lrc_parse(const char* lyrics) {
                 int s_int, cs_int;
                 uint32_t t_ms = 0;
                 int valid = 0;
-                
+
                 if (sscanf(p, "[%d:%f]%n", &m, &s_f, &bytes_read) == 2) {
                     t_ms = m * 60000 + (uint32_t)(s_f * 1000.0f);
                     valid = 1; p += bytes_read;
@@ -66,14 +65,15 @@ LrcDocument* lrc_parse(const char* lyrics) {
                 } else {
                     break;
                 }
-                
+
                 if (valid) {
                     if (doc->num_lines >= doc->capacity) {
                         doc->capacity = doc->capacity == 0 ? 32 : doc->capacity * 2;
-                        doc->lines = realloc(doc->lines, sizeof(LrcLine) * doc->capacity);
+                        doc->lines = realloc(doc->lines, sizeof(LyricLine) * doc->capacity);
                     }
-                    LrcLine* ll = &doc->lines[doc->num_lines++];
-                    ll->time_ms = t_ms;
+                    LyricLine *ll = &doc->lines[doc->num_lines++];
+                    ll->start_ms = t_ms;
+                    ll->end_ms = 0;
                     ll->text = strdup(text);
                     ll->raw_text = strdup(line);
                     valid_lines++;
@@ -84,36 +84,24 @@ LrcDocument* lrc_parse(const char* lyrics) {
         line = strtok(NULL, "\n");
     }
     free(copy);
-    
+
     if (valid_lines == 0) {
-        lrc_free(doc);
+        lyric_document_free(doc);
         return NULL;
     }
-    
-    // Multiple tags might appear out of chronological order line-by-line
-    qsort(doc->lines, doc->num_lines, sizeof(LrcLine), compare_lrc);
+
+    doc->is_synced = true;
+    qsort(doc->lines, doc->num_lines, sizeof(LyricLine), compare_lines);
     return doc;
 }
 
-void lrc_free(LrcDocument* doc) {
-    if (!doc) return;
-    for (int i = 0; i < doc->num_lines; i++) {
-        free(doc->lines[i].raw_text);
-        free(doc->lines[i].text);
-    }
-    free(doc->lines);
-    free(doc);
-}
+extern bool lrc_fetch_remote(const LyricFetchQuery *query, char **out_raw_data, char out_method_label[32]);
 
-int lrc_get_active_line(const LrcDocument* doc, uint32_t time_ms) {
-    if (!doc || doc->num_lines == 0) return -1;
-    int active = -1;
-    for (int i = 0; i < doc->num_lines; i++) {
-        if (doc->lines[i].time_ms <= time_ms) {
-            active = i;
-        } else {
-            break;
-        }
-    }
-    return active;
-}
+static const char* lrc_exts[] = { ".lrc", NULL };
+
+const KoniLyricsPlugin lrc_lyrics_plugin = {
+    .name = "LRC",
+    .supported_extensions = lrc_exts,
+    .parse = lrc_parse_document,
+    .fetch_remote = lrc_fetch_remote
+};

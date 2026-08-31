@@ -6,7 +6,7 @@
 #include "ui_input.h"
 #include "state.h"
 #include "file_list.h"
-#include "lrc_net.h"
+#include "lyrics.h"
 #include "config.h"
 #include <ncurses.h>
 #include <stdlib.h>
@@ -34,7 +34,7 @@ static void ui_update_state(void) {
         ui_cache.filepath[sizeof(ui_cache.filepath) - 1] = '\0';
         ui_cache.header_loaded_for_idx = -2;
         if (ui_cache.lrc_doc) {
-            lrc_free(ui_cache.lrc_doc);
+            lyric_document_free(ui_cache.lrc_doc);
             ui_cache.lrc_doc = NULL;
         }
         force_redraw = true;
@@ -51,22 +51,18 @@ static void ui_update_state(void) {
             if (p_metadata.lyrics) ui_cache.meta.lyrics = strdup(p_metadata.lyrics);
             
             if (ui_cache.lrc_doc) {
-                lrc_free(ui_cache.lrc_doc);
+                lyric_document_free(ui_cache.lrc_doc);
                 ui_cache.lrc_doc = NULL;
             }
             
-            if (ui_cache.meta.lyrics) {
-                ui_cache.lrc_doc = lrc_parse(ui_cache.meta.lyrics);
-                strncpy(current_lyrics_backend, "Embedded", sizeof(current_lyrics_backend) - 1);
-            } else {
-                strncpy(current_lyrics_backend, "Searching...", sizeof(current_lyrics_backend) - 1);
-                
-                bool pending_questions = !app_config.online_lyrics_asked || 
-                                        (app_config.online_lyrics && !app_config.download_online_lyrics_asked);
-                                        
-                if (!pending_questions) {
-                    lrc_fetch_async(ui_cache.meta.title, ui_cache.meta.artist, ui_cache.meta.album, atomic_load(&p_total_sec), ui_cache.filepath);
-                }
+            strncpy(current_lyrics_backend, "Searching...", sizeof(current_lyrics_backend) - 1);
+            
+            bool pending_questions = !app_config.online_lyrics_asked || 
+                                    (app_config.online_lyrics && !app_config.download_online_lyrics_asked);
+                                    
+            if (!pending_questions) {
+                lyrics_engine_fetch_async(ui_cache.meta.title, ui_cache.meta.artist, ui_cache.meta.album,
+                                          atomic_load(&p_total_sec), ui_cache.filepath, ui_cache.meta.lyrics);
             }
             
             ui_cache.fmt = p_format;
@@ -233,6 +229,6 @@ void ui_run(bool force_colors) {
     }
     
     koni_metadata_free(&ui_cache.meta);
-    if (ui_cache.lrc_doc) { lrc_free(ui_cache.lrc_doc); ui_cache.lrc_doc = NULL; }
+    if (ui_cache.lrc_doc) { lyric_document_free(ui_cache.lrc_doc); ui_cache.lrc_doc = NULL; }
     endwin();
 }

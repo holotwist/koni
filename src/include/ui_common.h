@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include "state.h"
 #include "codec.h"
-#include "lrc.h"
+#include "lyrics.h"
 
 extern unsigned long ui_frame_counter;
 extern bool vis_needs_full_redraw;
@@ -22,7 +22,7 @@ typedef struct {
     uint32_t smooth_rpos;
     int header_loaded_for_idx;
     char filepath[1024];
-    LrcDocument* lrc_doc;
+    LyricDocument* lrc_doc;
 } UICache;
 
 extern UICache ui_cache;
