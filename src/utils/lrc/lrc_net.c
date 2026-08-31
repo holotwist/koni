@@ -295,7 +295,13 @@ static int parse_netease_candidates(const char *json, NetEaseCandidate *candidat
             if (artists_arr && artists_end) {
                 *artists_end = '\0';
                 char *art_p = artists_arr;
-                while ((art_p = strstr(art_p, "\"name\":")) != NULL || (art_p = strstr(art_p, "\"name\" :")) != NULL) {
+                while (art_p) {
+                    char *found1 = strstr(art_p, "\"name\":");
+                    char *found2 = strstr(art_p, "\"name\" :");
+                    if (!found1 && !found2) break;
+                    if (found1 && found2) art_p = (found1 < found2) ? found1 : found2;
+                    else art_p = found1 ? found1 : found2;
+
                     art_p = strchr(art_p, ':');
                     if (!art_p) break;
                     art_p = strchr(art_p, '"');
@@ -373,8 +379,16 @@ static char* extract_lrclib_synced_lyrics(const char *json) {
     if (!json) return NULL;
     const char *p = json;
     
-    while ((p = strstr(p, "\"syncedLyrics\":")) != NULL || (p = strstr(p, "\"syncedLyrics\" :")) != NULL) {
-        const char *colon = strchr(p, ':');
+    while (p) {
+        const char *p1 = strstr(p, "\"syncedLyrics\":");
+        const char *p2 = strstr(p, "\"syncedLyrics\" :");
+        const char *match = NULL;
+        if (p1 && p2) match = (p1 < p2) ? p1 : p2;
+        else match = p1 ? p1 : p2;
+        
+        if (!match) break;
+        
+        const char *colon = strchr(match, ':');
         if (!colon) break;
         colon++;
         while (*colon == ' ' || *colon == '\t') colon++;
