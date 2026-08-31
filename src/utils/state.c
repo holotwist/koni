@@ -1,4 +1,5 @@
 #include "state.h"
+#include "ui_common.h"
 
 pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -34,7 +35,7 @@ atomic_int play_state_atomic = STATE_STOPPED;
 atomic_int current_cmd_atomic = CMD_NONE;
 atomic_int current_track_id = 0;
 atomic_int volume = 100;
-atomic_int seek_target_sec = -1;
+atomic_int seek_target_ms = -1;
 atomic_int play_mode_shuffle = 0;
 atomic_int play_mode_repeat = 0; // 0=Off, 1=All, 2=One
 
@@ -52,7 +53,9 @@ bool force_redraw = true;
 
 bool show_help_bar = false;
 bool force_vertical_layout = false;
-int saved_volume = 100;
+bool show_visualizer = true;
+bool show_lrc_overlay = false;
+int saved_volume = 100;;
 atomic_int play_mode_rgain = 0;
 
 float vis_ring_l[VIS_BUF_SIZE] = {0};
@@ -85,7 +88,53 @@ static void get_state_path(char *buf, size_t size) {
     }
 }
 
+static void load_playlist_queue(void) {
+    char path[1024];
+    const char *home = getenv("HOME");
+    if (home) snprintf(path, sizeof(path), "%s/.config/koni/queue.m3u", home);
+    else return;
+
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (line[0] && line[0] != '#') {
+            if (num_playlist_files >= playlist_capacity) {
+                playlist_capacity = playlist_capacity == 0 ? 1024 : playlist_capacity * 2;
+                playlist = realloc(playlist, sizeof(PlaylistEntry) * playlist_capacity);
+            }
+            strncpy(playlist[num_playlist_files].path, line, sizeof(playlist[num_playlist_files].path));
+            const char *name = strrchr(line, '/');
+            name = name ? name + 1 : line;
+            strncpy(playlist[num_playlist_files].name, name, 255);
+            playlist[num_playlist_files].display_width = utf8_display_width(name);
+            memset(&playlist[num_playlist_files].meta, 0, sizeof(KoniMetadata));
+            playlist[num_playlist_files].metadata_loaded = false;
+            playlist[num_playlist_files].duration_sec = 0;
+            num_playlist_files++;
+        }
+    }
+    fclose(f);
+}
+
+static void save_playlist_queue(void) {
+    char path[1024];
+    const char *home = getenv("HOME");
+    if (home) snprintf(path, sizeof(path), "%s/.config/koni/queue.m3u", home);
+    else return;
+
+    FILE *f = fopen(path, "w");
+    if (!f) return;
+    for (int i = 0; i < num_playlist_files; i++) {
+        fprintf(f, "%s\n", playlist[i].path);
+    }
+    fclose(f);
+}
+
 void load_state(void) {
+    load_playlist_queue();
     char path[1024];
     get_state_path(path, sizeof(path));
     if (path[0] == '\0') return;
@@ -105,6 +154,8 @@ void load_state(void) {
             else if (strcmp(key, "rgain") == 0) atomic_store(&play_mode_rgain, atoi(val));
             else if (strcmp(key, "vis_mode") == 0) current_vis_mode = atoi(val);
             else if (strcmp(key, "layout") == 0) force_vertical_layout = atoi(val) ? true : false;
+            else if (strcmp(key, "show_visualizer") == 0) show_visualizer = atoi(val) ? true : false;
+            else if (strcmp(key, "show_lrc_overlay") == 0) show_lrc_overlay = atoi(val) ? true : false;
         }
     }
     fclose(f);
@@ -132,8 +183,11 @@ void save_state(void) {
     fprintf(f, "rgain=%d\n", atomic_load(&play_mode_rgain));
     fprintf(f, "vis_mode=%d\n", current_vis_mode);
     fprintf(f, "layout=%d\n", force_vertical_layout ? 1 : 0);
+    fprintf(f, "show_visualizer=%d\n", show_visualizer ? 1 : 0);
+    fprintf(f, "show_lrc_overlay=%d\n", show_lrc_overlay ? 1 : 0);
     
     fclose(f);
+    save_playlist_queue();
 }
 
 bool player_advance_track(PlayerCommand cmd) {

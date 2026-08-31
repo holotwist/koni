@@ -33,13 +33,19 @@ void draw_playlist_panel(int y, int x, int h, int w) {
         else if (idx == selected_playlist_idx) attron(A_REVERSE);
         else attron(COLOR_PAIR(2));
         
+        char formatted_name[512] = {0};
+        pthread_mutex_lock(&state_mutex);
+        format_list_item(formatted_name, sizeof(formatted_name), max_disp_len, playlist[idx].name, 
+                         playlist[idx].metadata_loaded ? &playlist[idx].meta : NULL, playlist[idx].duration_sec, false);
+        pthread_mutex_unlock(&state_mutex);
+                         
         char disp_buf[1024] = {0};
-        int text_w = playlist[idx].display_width;
+        int text_w = utf8_display_width(formatted_name);
         
         if (idx == selected_playlist_idx && current_focus == FOCUS_PLAYLIST) {
-            get_marquee_text(playlist[idx].name, text_w, max_disp_len, ui_frame_counter, disp_buf, sizeof(disp_buf));
+            get_marquee_text(formatted_name, text_w, max_disp_len, ui_frame_counter, disp_buf, sizeof(disp_buf));
         } else {
-            get_marquee_text(playlist[idx].name, text_w, max_disp_len, 0, disp_buf, sizeof(disp_buf));
+            get_marquee_text(formatted_name, text_w, max_disp_len, 0, disp_buf, sizeof(disp_buf));
         }
         
         int chars_copied = (text_w <= max_disp_len) ? text_w : max_disp_len;

@@ -5,6 +5,8 @@
 #include "codec.h"
 #include "protocols/mpris.h"
 #include "vis_math.h"
+#include "config.h"
+#include <curl/curl.h>
 
 #include <locale.h>
 #include <unistd.h>
@@ -27,6 +29,8 @@ int main(int argc, char **argv) {
     }
 
     setlocale(LC_ALL, ""); 
+    config_init(); // Initialize configuration manager
+    curl_global_init(CURL_GLOBAL_DEFAULT);
     load_state(); // Load all the previous state
 
     if (dir_idx != -1) { 
@@ -40,6 +44,7 @@ int main(int argc, char **argv) {
         strncpy(current_dir, ".", sizeof(current_dir));
     }
 
+    file_list_init();
     load_directory(".");
     vis_math_init();
     
@@ -56,12 +61,21 @@ int main(int argc, char **argv) {
     
     mpris_shutdown();
     save_state(); // Dump state before exiting
+    file_list_shutdown();
     
     koni_metadata_free(&p_metadata);
     
     // Free dynamically allocated arrays
-    if (files) free(files);
-    if (playlist) free(playlist);
+    if (files) {
+        for (int i = 0; i < num_files; i++) koni_metadata_free(&files[i].meta);
+        free(files);
+    }
+    if (playlist) {
+        for (int i = 0; i < num_playlist_files; i++) koni_metadata_free(&playlist[i].meta);
+        free(playlist);
+    }
+    
+    curl_global_cleanup();
     
     return 0;
 }

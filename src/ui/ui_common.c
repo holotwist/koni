@@ -4,11 +4,13 @@
 #include "ui_common.h"
 #include <wchar.h>
 #include <stdlib.h>
+#include <string.h>
 
 unsigned long ui_frame_counter = 0;
 bool vis_needs_full_redraw = false;
 int ui_last_selected_idx = -1;
 int ui_last_playlist_idx = -1;
+char current_lyrics_backend[32] = "";
 UICache ui_cache = { .idx = -2, .header_loaded_for_idx = -2 };
 
 int utf8_display_width(const char *str) {
@@ -96,6 +98,65 @@ int utf8_byte_offset_for_suffix(const char *str, int target_width) {
         byte_offset += len;
     }
     return byte_offset;
+}
+
+void format_list_item(char* out_buf, size_t out_size, int max_w, const char* filename, KoniMetadata* meta, uint32_t duration_sec, bool is_dir) {
+    if (is_dir) {
+        snprintf(out_buf, out_size, "%s", filename);
+        return;
+    }
+    
+    char time_str[16] = "";
+    if (duration_sec > 0) {
+        snprintf(time_str, sizeof(time_str), "%02u:%02u", duration_sec / 60, duration_sec % 60);
+    }
+    
+    if (max_w >= 80 && meta && (meta->title || meta->artist || meta->album)) {
+        const char* title = meta->title && strlen(meta->title) ? meta->title : filename;
+        const char* artist = meta->artist && strlen(meta->artist) ? meta->artist : "";
+        const char* album = meta->album && strlen(meta->album) ? meta->album : "";
+        
+        int w_title = max_w * 35 / 100;
+        int w_artist = max_w * 25 / 100;
+        int w_album = max_w * 25 / 100;
+        
+        char t_buf[256] = {0}; char a_buf[256] = {0}; char al_buf[256] = {0};
+        
+        int t_bytes = utf8_byte_offset_for_width(title, w_title - 2);
+        snprintf(t_buf, sizeof(t_buf), "%.*s", t_bytes, title);
+        
+        int a_bytes = utf8_byte_offset_for_width(artist, w_artist - 2);
+        snprintf(a_buf, sizeof(a_buf), "%.*s", a_bytes, artist);
+        
+        int al_bytes = utf8_byte_offset_for_width(album, w_album - 2);
+        snprintf(al_buf, sizeof(al_buf), "%.*s", al_bytes, album);
+        
+        int t_pad = w_title - utf8_display_width(t_buf); if(t_pad<0) t_pad=0;
+        int a_pad = w_artist - utf8_display_width(a_buf); if(a_pad<0) a_pad=0;
+        int al_pad = w_album - utf8_display_width(al_buf); if(al_pad<0) al_pad=0;
+        
+        snprintf(out_buf, out_size, "%s%*s %s%*s %s%*s %s", 
+            t_buf, t_pad, "", a_buf, a_pad, "", al_buf, al_pad, "", time_str);
+    } else if (meta && (meta->title || meta->artist)) {
+        const char* title = meta->title && strlen(meta->title) ? meta->title : filename;
+        if (meta->artist && strlen(meta->artist)) {
+            snprintf(out_buf, out_size, "%s - %s", title, meta->artist);
+        } else {
+            snprintf(out_buf, out_size, "%s", title);
+        }
+        if (duration_sec > 0) {
+            char temp[512];
+            snprintf(temp, sizeof(temp), "%s", out_buf);
+            snprintf(out_buf, out_size, "%s (%s)", temp, time_str);
+        }
+    } else {
+        snprintf(out_buf, out_size, "%s", filename);
+        if (duration_sec > 0) {
+            char temp[512];
+            snprintf(temp, sizeof(temp), "%s", out_buf);
+            snprintf(out_buf, out_size, "%s (%s)", temp, time_str);
+        }
+    }
 }
 
 void ui_draw_box(int y, int x, int h, int w, const char* title, int color_pair) {

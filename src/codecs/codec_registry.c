@@ -2,6 +2,7 @@
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 extern const KoniCodecImpl dana_codec_impl;
 extern const KoniCodecImpl ma_codec_impl;
@@ -51,5 +52,11 @@ void koni_metadata_free(KoniMetadata* meta) {
     if (meta->artist) free(meta->artist);
     if (meta->album) free(meta->album);
     if (meta->lyrics) free(meta->lyrics);
+    if (meta->art_url) {
+        if (strncmp(meta->art_url, "file://", 7) == 0) {
+            remove(meta->art_url + 7); // Clean up the temp image
+        }
+        free(meta->art_url);
+    }
     memset(meta, 0, sizeof(KoniMetadata));
 }

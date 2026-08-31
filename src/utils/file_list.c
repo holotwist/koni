@@ -7,6 +7,8 @@
 #include "ui_common.h"
 #include <dirent.h>
 #include <sys/stat.h>
+#include <pthread.h>
+#include <unistd.h>
 #include <string.h>
 #include <strings.h>
 #include <stdio.h>
@@ -19,10 +21,94 @@ static int file_cmp(const void *a, const void *b) {
     return strcasecmp(fa->name, fb->name);
 }
 
+static pthread_t meta_thread;
+static bool meta_thread_running = false;
+
+static void* metadata_worker(void* arg) {
+    (void)arg;
+    while (meta_thread_running) {
+        char filepath[1024] = {0};
+        int target_file_idx = -1;
+        int target_playlist_idx = -1;
+        
+        pthread_mutex_lock(&state_mutex);
+        for (int i = 0; i < num_files; i++) {
+            if (!files[i].is_dir && !files[i].metadata_loaded) {
+                snprintf(filepath, sizeof(filepath), "%s/%s", current_dir, files[i].name);
+                target_file_idx = i;
+                break;
+            }
+        }
+        if (target_file_idx == -1) {
+            for (int i = 0; i < num_playlist_files; i++) {
+                if (!playlist[i].metadata_loaded) {
+                    strncpy(filepath, playlist[i].path, sizeof(filepath));
+                    target_playlist_idx = i;
+                    break;
+                }
+            }
+        }
+        pthread_mutex_unlock(&state_mutex);
+        
+        if (target_file_idx == -1 && target_playlist_idx == -1) {
+            usleep(100000);
+            continue;
+        }
+        
+        KoniMetadata meta = {0};
+        uint32_t duration = 0;
+        const KoniCodecImpl* codec = koni_find_codec_by_ext(filepath);
+        if (codec && codec->read_metadata) {
+            codec->read_metadata(filepath, &meta, &duration);
+        }
+        
+        pthread_mutex_lock(&state_mutex);
+        if (target_file_idx != -1 && target_file_idx < num_files) {
+            char current_filepath[1024];
+            snprintf(current_filepath, sizeof(current_filepath), "%s/%s", current_dir, files[target_file_idx].name);
+            if (strcmp(filepath, current_filepath) == 0 && !files[target_file_idx].metadata_loaded) {
+                files[target_file_idx].meta = meta;
+                files[target_file_idx].duration_sec = duration;
+                files[target_file_idx].metadata_loaded = true;
+                force_redraw = true;
+            } else {
+                koni_metadata_free(&meta);
+            }
+        } else if (target_playlist_idx != -1 && target_playlist_idx < num_playlist_files) {
+            if (strcmp(filepath, playlist[target_playlist_idx].path) == 0 && !playlist[target_playlist_idx].metadata_loaded) {
+                playlist[target_playlist_idx].meta = meta;
+                playlist[target_playlist_idx].duration_sec = duration;
+                playlist[target_playlist_idx].metadata_loaded = true;
+                force_redraw = true;
+            } else {
+                koni_metadata_free(&meta);
+            }
+        } else koni_metadata_free(&meta);
+        pthread_mutex_unlock(&state_mutex);
+    }
+    return NULL;
+}
+
+void file_list_init(void) {
+    if (!meta_thread_running) {
+        meta_thread_running = true;
+        pthread_create(&meta_thread, NULL, metadata_worker, NULL);
+    }
+}
+
+void file_list_shutdown(void) {
+    if (meta_thread_running) {
+        meta_thread_running = false;
+        pthread_join(meta_thread, NULL);
+    }
+}
+
 void load_directory(const char *path) {
     DIR *dir = opendir(path);
     if (!dir) return;
 
+    pthread_mutex_lock(&state_mutex);
+    for (int i = 0; i < num_files; i++) koni_metadata_free(&files[i].meta);
     num_files = 0;
     if (files_capacity == 0) {
         files_capacity = 1024;
@@ -32,6 +118,9 @@ void load_directory(const char *path) {
     strcpy(files[num_files].name, "..");
     files[num_files].is_dir = 1;
     files[num_files].display_width = 2;
+    memset(&files[num_files].meta, 0, sizeof(KoniMetadata));
+    files[num_files].metadata_loaded = true;
+    files[num_files].duration_sec = 0;
     num_files++;
 
     struct dirent *entry;
@@ -52,6 +141,9 @@ void load_directory(const char *path) {
                 strncpy(files[num_files].name, entry->d_name, 255);
                 files[num_files].is_dir = is_dir;
                 files[num_files].display_width = utf8_display_width(entry->d_name);
+                memset(&files[num_files].meta, 0, sizeof(KoniMetadata));
+                files[num_files].metadata_loaded = is_dir ? true : false;
+                files[num_files].duration_sec = 0;
                 num_files++;
             }
         }
@@ -61,4 +153,5 @@ void load_directory(const char *path) {
 
     selected_file_idx = 0;
     scroll_offset = 0;
+    pthread_mutex_unlock(&state_mutex);
 }

@@ -124,6 +124,15 @@ static void append_metadata_variant(DBusMessageIter *iter)
             append_variant_string(&dict_entry, p_metadata.album);
             dbus_message_iter_close_container(&dict, &dict_entry);
         }
+        
+        if (p_metadata.art_url && strlen(p_metadata.art_url) > 0)
+        {
+            dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY, NULL, &dict_entry);
+            const char *art_key = "mpris:artUrl";
+            dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &art_key);
+            append_variant_string(&dict_entry, p_metadata.art_url);
+            dbus_message_iter_close_container(&dict, &dict_entry);
+        }
     }
     else
     {
@@ -187,6 +196,9 @@ static DBusHandlerResult mpris_handle_methods(DBusConnection *conn, DBusMessage 
             "    <property name=\"CanRaise\" type=\"b\" access=\"read\"/>\n"
             "    <property name=\"HasTrackList\" type=\"b\" access=\"read\"/>\n"
             "    <property name=\"Identity\" type=\"s\" access=\"read\"/>\n"
+            "    <property name=\"CanSetFullscreen\" type=\"b\" access=\"read\"/>\n"
+            "    <property name=\"SupportedUriSchemes\" type=\"as\" access=\"read\"/>\n"
+            "    <property name=\"SupportedMimeTypes\" type=\"as\" access=\"read\"/>\n"
             "  </interface>\n"
             "  <interface name=\"org.mpris.MediaPlayer2.Player\">\n"
             "    <method name=\"Next\"/>\n"
@@ -279,12 +291,12 @@ static DBusHandlerResult mpris_handle_methods(DBusConnection *conn, DBusMessage 
         dbus_int64_t offset_us;
         if (dbus_message_get_args(msg, NULL, DBUS_TYPE_INT64, &offset_us, DBUS_TYPE_INVALID))
         {
-            int base = (atomic_load(&current_cmd_atomic) == CMD_SEEK) ? atomic_load(&seek_target_sec) : atomic_load(&p_current_sec);
-            int t = base + (offset_us / 1000000LL);
-            int tot = atomic_load(&p_total_sec);
-            if (t > tot) t = tot - 1;
-            if (t < 0) t = 0;
-            atomic_store(&seek_target_sec, t);
+            int base_ms = (atomic_load(&current_cmd_atomic) == CMD_SEEK) ? atomic_load(&seek_target_ms) : (atomic_load(&p_current_sec) * 1000);
+            int t_ms = base_ms + (offset_us / 1000LL);
+            int tot_ms = atomic_load(&p_total_sec) * 1000;
+            if (t_ms > tot_ms) t_ms = tot_ms - 1000;
+            if (t_ms < 0) t_ms = 0;
+            atomic_store(&seek_target_ms, t_ms);
             atomic_store(&current_cmd_atomic, CMD_SEEK);
         }
     }
@@ -294,11 +306,11 @@ static DBusHandlerResult mpris_handle_methods(DBusConnection *conn, DBusMessage 
         dbus_int64_t pos_us;
         if (dbus_message_get_args(msg, NULL, DBUS_TYPE_OBJECT_PATH, &track_id, DBUS_TYPE_INT64, &pos_us, DBUS_TYPE_INVALID))
         {
-            int t = pos_us / 1000000LL;
-            int tot = atomic_load(&p_total_sec);
-            if (t > tot) t = tot - 1;
-            if (t < 0) t = 0;
-            atomic_store(&seek_target_sec, t);
+            int t_ms = pos_us / 1000LL;
+            int tot_ms = atomic_load(&p_total_sec) * 1000;
+            if (t_ms > tot_ms) t_ms = tot_ms - 1000;
+            if (t_ms < 0) t_ms = 0;
+            atomic_store(&seek_target_ms, t_ms);
             atomic_store(&current_cmd_atomic, CMD_SEEK);
         }
     }
@@ -397,6 +409,24 @@ static DBusHandlerResult mpris_handle_methods(DBusConnection *conn, DBusMessage 
                 dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "b", &variant);
                 dbus_bool_t val = FALSE;
                 dbus_message_iter_append_basic(&variant, DBUS_TYPE_BOOLEAN, &val);
+                dbus_message_iter_close_container(&reply_args, &variant);
+            }
+            else if (strcmp(prop, "SupportedUriSchemes") == 0)
+            {
+                DBusMessageIter variant, as_array;
+                dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "as", &variant);
+                dbus_message_iter_open_container(&variant, DBUS_TYPE_ARRAY, "s", &as_array);
+                const char* scheme = "file";
+                dbus_message_iter_append_basic(&as_array, DBUS_TYPE_STRING, &scheme);
+                dbus_message_iter_close_container(&variant, &as_array);
+                dbus_message_iter_close_container(&reply_args, &variant);
+            }
+            else if (strcmp(prop, "SupportedMimeTypes") == 0)
+            {
+                DBusMessageIter variant, as_array;
+                dbus_message_iter_open_container(&reply_args, DBUS_TYPE_VARIANT, "as", &variant);
+                dbus_message_iter_open_container(&variant, DBUS_TYPE_ARRAY, "s", &as_array);
+                dbus_message_iter_close_container(&variant, &as_array);
                 dbus_message_iter_close_container(&reply_args, &variant);
             }
             else
@@ -526,6 +556,34 @@ static DBusHandlerResult mpris_handle_methods(DBusConnection *conn, DBusMessage 
                 dbus_message_iter_close_container(&dict_entry, &variant);
                 dbus_message_iter_close_container(&array, &dict_entry);
             }
+
+            // SupportedUriSchemes
+            dbus_message_iter_open_container(&array, DBUS_TYPE_DICT_ENTRY, NULL, &dict_entry);
+            const char *uri_key = "SupportedUriSchemes";
+            dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &uri_key);
+            {
+                DBusMessageIter variant, as_array;
+                dbus_message_iter_open_container(&dict_entry, DBUS_TYPE_VARIANT, "as", &variant);
+                dbus_message_iter_open_container(&variant, DBUS_TYPE_ARRAY, "s", &as_array);
+                const char* scheme = "file";
+                dbus_message_iter_append_basic(&as_array, DBUS_TYPE_STRING, &scheme);
+                dbus_message_iter_close_container(&variant, &as_array);
+                dbus_message_iter_close_container(&dict_entry, &variant);
+            }
+            dbus_message_iter_close_container(&array, &dict_entry);
+
+            // SupportedMimeTypes
+            dbus_message_iter_open_container(&array, DBUS_TYPE_DICT_ENTRY, NULL, &dict_entry);
+            const char *mime_key = "SupportedMimeTypes";
+            dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &mime_key);
+            {
+                DBusMessageIter variant, as_array;
+                dbus_message_iter_open_container(&dict_entry, DBUS_TYPE_VARIANT, "as", &variant);
+                dbus_message_iter_open_container(&variant, DBUS_TYPE_ARRAY, "s", &as_array);
+                dbus_message_iter_close_container(&variant, &as_array);
+                dbus_message_iter_close_container(&dict_entry, &variant);
+            }
+            dbus_message_iter_close_container(&array, &dict_entry);
         }
 
         dbus_message_iter_close_container(&reply_args, &array);

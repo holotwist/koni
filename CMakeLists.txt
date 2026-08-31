@@ -10,6 +10,8 @@ if(PKG_CONFIG_FOUND)
     pkg_check_modules(DBUS QUIET dbus-1)
 endif()
 
+find_package(CURL REQUIRED)
+
 add_compile_options(-O3 -flto -ffast-math -funroll-loops -Wall -Wextra)
 add_compile_definitions(NDEBUG)
 
@@ -52,16 +54,22 @@ add_executable(koni
     src/utils/state.c
     src/utils/file_list.c
     src/utils/vis_math.c
+    src/utils/lrc/lrc.c
     src/audio/audio.c
     src/audio/replaygain/replaygain.c
+    src/utils/config_manager/config.c
+    src/utils/lrc/lrc_net.c
     src/codecs/codec_registry.c
-    src/codecs/dana_codec.c
-    src/codecs/ma_codec.c
+    src/codecs/dana_codec/dana_codec.c
+    src/codecs/dana_codec/metadata.c
+    src/codecs/ma_codec/ma_codec.c
+    src/codecs/ma_codec/metadata.c
     src/ui/ui_common.c
     src/ui/ui_animations.c
     src/ui/ui_files.c
     src/ui/ui_playlist.c
     src/ui/ui_vis.c
+    src/ui/ui_lrc_overlay.c
     src/ui/visualizers/vis_renderer.c
     src/ui/visualizers/vis_spectrum.c
     src/ui/visualizers/vis_oscilloscope.c
@@ -82,8 +90,9 @@ target_include_directories(koni PUBLIC
 )
 
 if(DBUS_FOUND)
-    target_include_directories(koni PUBLIC ${DBUS_INCLUDE_DIRS})
-    target_link_libraries(koni ncursesw pthread m ${CMAKE_DL_LIBS} ${DBUS_LIBRARIES})
+    target_include_directories(koni PUBLIC ${DBUS_INCLUDE_DIRS} ${CURL_INCLUDE_DIRS})
+    target_link_libraries(koni ncursesw pthread m ${CMAKE_DL_LIBS} ${DBUS_LIBRARIES} ${CURL_LIBRARIES})
 else()
-    target_link_libraries(koni ncursesw pthread m ${CMAKE_DL_LIBS})
+    target_include_directories(koni PUBLIC ${CURL_INCLUDE_DIRS})
+    target_link_libraries(koni ncursesw pthread m ${CMAKE_DL_LIBS} ${CURL_LIBRARIES})
 endif()

@@ -4,6 +4,8 @@
 #include "ui_input.h"
 #include "ui_common.h"
 #include "state.h"
+#include "config.h"
+#include "lrc_net.h"
 #include "file_list.h"
 
 #include <ncurses.h>
@@ -12,6 +14,41 @@
 #include <stdlib.h>
 
 bool ui_handle_input(int ch) {
+    if (active_tab == 2) {
+        if (!app_config.online_lyrics_asked) {
+            if (ch == 'y' || ch == 'Y') {
+                app_config.online_lyrics = true;
+                app_config.online_lyrics_asked = true;
+                config_save();
+                return true;
+            } else if (ch == 'n' || ch == 'N') {
+                app_config.online_lyrics = false;
+                app_config.online_lyrics_asked = true;
+                config_save();
+                lrc_fetch_async(ui_cache.meta.title, ui_cache.meta.artist, ui_cache.meta.album, atomic_load(&p_total_sec), ui_cache.filepath);
+                return true;
+            } else if (ch != '1' && ch != 'q' && ch != 'Q') {
+                return true; // Block other interactions until answered
+            }
+        } else if (app_config.online_lyrics && !app_config.download_online_lyrics_asked) {
+            if (ch == 'y' || ch == 'Y') {
+                app_config.download_online_lyrics = true;
+                app_config.download_online_lyrics_asked = true;
+                config_save();
+                lrc_fetch_async(ui_cache.meta.title, ui_cache.meta.artist, ui_cache.meta.album, atomic_load(&p_total_sec), ui_cache.filepath);
+                return true;
+            } else if (ch == 'n' || ch == 'N') {
+                app_config.download_online_lyrics = false;
+                app_config.download_online_lyrics_asked = true;
+                config_save();
+                lrc_fetch_async(ui_cache.meta.title, ui_cache.meta.artist, ui_cache.meta.album, atomic_load(&p_total_sec), ui_cache.filepath);
+                return true;
+            } else if (ch != '1' && ch != 'q' && ch != 'Q') {
+                return true; // Block other interactions until answered
+            }
+        }
+    }
+
     switch (ch) {
         case 'q': case 'Q':
             atomic_store(&current_cmd_atomic, CMD_QUIT);
@@ -37,22 +74,22 @@ bool ui_handle_input(int ch) {
             
         case KEY_LEFT:
             if (atomic_load(&play_state_atomic) != STATE_STOPPED) {
-                int base = (atomic_load(&current_cmd_atomic) == CMD_SEEK) ? atomic_load(&seek_target_sec) : atomic_load(&p_current_sec);
-                int t = base - 5;
-                if (t < 0) t = 0;
-                atomic_store(&seek_target_sec, t);
+                int base_ms = (atomic_load(&current_cmd_atomic) == CMD_SEEK) ? atomic_load(&seek_target_ms) : (atomic_load(&p_current_sec) * 1000);
+                int t_ms = base_ms - 5000;
+                if (t_ms < 0) t_ms = 0;
+                atomic_store(&seek_target_ms, t_ms);
                 atomic_store(&current_cmd_atomic, CMD_SEEK);
             }
             break;
             
         case KEY_RIGHT:
             if (atomic_load(&play_state_atomic) != STATE_STOPPED) {
-                int base = (atomic_load(&current_cmd_atomic) == CMD_SEEK) ? atomic_load(&seek_target_sec) : atomic_load(&p_current_sec);
-                int t = base + 5;
-                int tot = atomic_load(&p_total_sec);
-                if (t > tot) t = tot - 1;
-                if (t < 0) t = 0;
-                atomic_store(&seek_target_sec, t);
+                int base_ms = (atomic_load(&current_cmd_atomic) == CMD_SEEK) ? atomic_load(&seek_target_ms) : (atomic_load(&p_current_sec) * 1000);
+                int t_ms = base_ms + 5000;
+                int tot_ms = atomic_load(&p_total_sec) * 1000;
+                if (t_ms > tot_ms) t_ms = tot_ms - 1000;
+                if (t_ms < 0) t_ms = 0;
+                atomic_store(&seek_target_ms, t_ms);
                 atomic_store(&current_cmd_atomic, CMD_SEEK);
             }
             break;
@@ -60,6 +97,7 @@ bool ui_handle_input(int ch) {
         case 'a':
             if (current_focus == FOCUS_FILES && num_files > 0) {
                 if (!files[selected_file_idx].is_dir) {
+                    pthread_mutex_lock(&state_mutex);
                     if (num_playlist_files >= playlist_capacity) {
                         playlist_capacity = playlist_capacity == 0 ? 1024 : playlist_capacity * 2;
                         playlist = realloc(playlist, sizeof(PlaylistEntry) * playlist_capacity);
@@ -67,13 +105,18 @@ bool ui_handle_input(int ch) {
                     snprintf(playlist[num_playlist_files].path, sizeof(playlist[num_playlist_files].path), "%s/%s", current_dir, files[selected_file_idx].name);
                     strncpy(playlist[num_playlist_files].name, files[selected_file_idx].name, 255);
                     playlist[num_playlist_files].display_width = files[selected_file_idx].display_width;
+                    memset(&playlist[num_playlist_files].meta, 0, sizeof(KoniMetadata));
+                    playlist[num_playlist_files].metadata_loaded = false;
+                    playlist[num_playlist_files].duration_sec = 0;
                     num_playlist_files++;
+                    pthread_mutex_unlock(&state_mutex);
                 }
             }
             break;
             
         case 'A':
             if (current_focus == FOCUS_FILES) {
+                pthread_mutex_lock(&state_mutex);
                 for (int i = 0; i < num_files; i++) {
                     if (!files[i].is_dir) {
                         if (num_playlist_files >= playlist_capacity) {
@@ -83,23 +126,31 @@ bool ui_handle_input(int ch) {
                         snprintf(playlist[num_playlist_files].path, sizeof(playlist[num_playlist_files].path), "%s/%s", current_dir, files[i].name);
                         strncpy(playlist[num_playlist_files].name, files[i].name, 255);
                         playlist[num_playlist_files].display_width = files[i].display_width;
+                        memset(&playlist[num_playlist_files].meta, 0, sizeof(KoniMetadata));
+                        playlist[num_playlist_files].metadata_loaded = false;
+                        playlist[num_playlist_files].duration_sec = 0;
                         num_playlist_files++;
                     }
                 }
+                pthread_mutex_unlock(&state_mutex);
             }
             break;
             
         case 'W':
             if (current_focus == FOCUS_PLAYLIST) {
+                pthread_mutex_lock(&state_mutex);
+                for (int i = 0; i < num_playlist_files; i++) koni_metadata_free(&playlist[i].meta);
                 num_playlist_files = 0;
                 selected_playlist_idx = 0;
                 playlist_scroll_offset = 0;
+                pthread_mutex_unlock(&state_mutex);
             }
             break;
             
         case 'd': case KEY_DC: case KEY_BACKSPACE: case 127:
             if (current_focus == FOCUS_PLAYLIST && num_playlist_files > 0) {
                 pthread_mutex_lock(&state_mutex);
+                koni_metadata_free(&playlist[selected_playlist_idx].meta);
                 for (int i = selected_playlist_idx; i < num_playlist_files - 1; i++) {
                     playlist[i] = playlist[i + 1];
                 }
@@ -177,9 +228,11 @@ bool ui_handle_input(int ch) {
         case 'n': case '>': atomic_store(&current_cmd_atomic, CMD_NEXT); break;
         case 'b': case '<': atomic_store(&current_cmd_atomic, CMD_PREV); break;
         case '1': active_tab = 1; break;
-        case '2': if (ui_cache.meta.lyrics != NULL) active_tab = 2; break;
+        case '2': active_tab = 2; break;
         case 'c': case 'C': if (active_tab == 1) current_vis_mode = (current_vis_mode + 1) % 4; break;
         case 'f': case 'F': is_fullscreen = !is_fullscreen; break;
+        case 'v': case 'V': show_visualizer = !show_visualizer; break;
+        case 'y': case 'Y': show_lrc_overlay = !show_lrc_overlay; break;
         case '+': case '=': if (atomic_load(&volume) < 200) atomic_fetch_add(&volume, 5); break;
         case '-': case '_': if (atomic_load(&volume) > 0) atomic_fetch_sub(&volume, 5); break;
     }

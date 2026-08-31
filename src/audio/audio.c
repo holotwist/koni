@@ -116,9 +116,14 @@ void *audio_thread_func(void *arg) {
             continue; 
         }
 
-        KoniAudioFormat fmt; KoniMetadata meta;
+        KoniAudioFormat fmt; 
         codec->get_format(dec, &fmt);
-        codec->get_metadata(dec, &meta);
+        
+        KoniMetadata meta = {0};
+        uint32_t dur = 0;
+        if (codec->read_metadata) {
+            codec->read_metadata(filepath, &meta, &dur);
+        }
 
         // Save generic metadata to state
         pthread_mutex_lock(&state_mutex);
@@ -184,10 +189,10 @@ void *audio_thread_func(void *arg) {
                 atomic_store(&current_cmd_atomic, CMD_NONE);
             }
             if (cmd == CMD_SEEK) {
-                int target_sec = atomic_load(&seek_target_sec);
+                int target_ms = atomic_load(&seek_target_ms);
                 atomic_store(&current_cmd_atomic, CMD_NONE);
-                if (target_sec >= 0) {
-                    uint64_t target_sample = (uint64_t)target_sec * fmt.sample_rate;
+                if (target_ms >= 0) {
+                    uint64_t target_sample = ((uint64_t)target_ms * fmt.sample_rate) / 1000ULL;
                     if (codec->seek(dec, target_sample)) {
                         samples_played = target_sample;
                         atomic_store(&p_current_sec, samples_played / fmt.sample_rate);

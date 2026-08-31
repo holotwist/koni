@@ -14,12 +14,18 @@ typedef struct {
     char name[256];
     int is_dir;
     int display_width;
+    KoniMetadata meta;
+    uint32_t duration_sec;
+    bool metadata_loaded;
 } FileEntry;
 
 typedef struct {
     char path[1024];
     char name[256];
     int display_width;
+    KoniMetadata meta;
+    uint32_t duration_sec;
+    bool metadata_loaded;
 } PlaylistEntry;
 
 typedef enum {
@@ -85,7 +91,7 @@ extern atomic_int  play_state_atomic;
 extern atomic_int  current_cmd_atomic;
 extern atomic_int  current_track_id;
 extern atomic_int  volume;
-extern atomic_int  seek_target_sec;
+extern atomic_int  seek_target_ms;
 extern atomic_int  play_mode_shuffle;
 extern atomic_int  play_mode_repeat;
 
@@ -103,6 +109,8 @@ extern bool force_redraw;
 
 extern bool show_help_bar;
 extern bool force_vertical_layout;
+extern bool show_visualizer;
+extern bool show_lrc_overlay;
 extern int saved_volume;
 extern atomic_int play_mode_rgain;
 

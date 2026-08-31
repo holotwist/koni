@@ -6,6 +6,8 @@
 #include "ui_input.h"
 #include "state.h"
 #include "file_list.h"
+#include "lrc_net.h"
+#include "config.h"
 #include <ncurses.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,6 +33,10 @@ static void ui_update_state(void) {
         strncpy(ui_cache.filepath, playing_filepath, sizeof(ui_cache.filepath) - 1);
         ui_cache.filepath[sizeof(ui_cache.filepath) - 1] = '\0';
         ui_cache.header_loaded_for_idx = -2;
+        if (ui_cache.lrc_doc) {
+            lrc_free(ui_cache.lrc_doc);
+            ui_cache.lrc_doc = NULL;
+        }
         force_redraw = true;
     }
 
@@ -44,6 +50,25 @@ static void ui_update_state(void) {
             if (p_metadata.album) ui_cache.meta.album = strdup(p_metadata.album);
             if (p_metadata.lyrics) ui_cache.meta.lyrics = strdup(p_metadata.lyrics);
             
+            if (ui_cache.lrc_doc) {
+                lrc_free(ui_cache.lrc_doc);
+                ui_cache.lrc_doc = NULL;
+            }
+            
+            if (ui_cache.meta.lyrics) {
+                ui_cache.lrc_doc = lrc_parse(ui_cache.meta.lyrics);
+                strncpy(current_lyrics_backend, "Embedded", sizeof(current_lyrics_backend) - 1);
+            } else {
+                strncpy(current_lyrics_backend, "Searching...", sizeof(current_lyrics_backend) - 1);
+                
+                bool pending_questions = !app_config.online_lyrics_asked || 
+                                        (app_config.online_lyrics && !app_config.download_online_lyrics_asked);
+                                        
+                if (!pending_questions) {
+                    lrc_fetch_async(ui_cache.meta.title, ui_cache.meta.artist, ui_cache.meta.album, atomic_load(&p_total_sec), ui_cache.filepath);
+                }
+            }
+            
             ui_cache.fmt = p_format;
             strncpy(ui_cache.filename, playing_filename, 255);
             ui_cache.header_loaded_for_idx = playing_file_idx;
@@ -51,11 +76,6 @@ static void ui_update_state(void) {
         }
     }
     pthread_mutex_unlock(&state_mutex);
-
-    if (active_tab == 2 && ui_cache.meta.lyrics == NULL) {
-        active_tab = 1;
-        force_redraw = true;
-    }
 
     uint32_t target_play_pos = atomic_load(&p_frames_consumed);
     uint32_t srate = atomic_load(&vis_srate);
@@ -85,40 +105,46 @@ static void ui_loop(void) {
     bool is_vertical = (draw_max_y * 2 > max_x) || force_vertical_layout;
     int player_h = 5;
     if (player_h > draw_max_y) player_h = draw_max_y;
+    
+    int lrc_h = (show_lrc_overlay && ui_cache.lrc_doc && active_tab != 2) ? 3 : 0;
+    if (draw_max_y - player_h - lrc_h < 5) lrc_h = 0; // Fallback for tiny screens
+    
+    int top_h = draw_max_y - player_h - lrc_h;
 
     if (is_fullscreen) {
-        if (draw_max_y > player_h + 2) {
-            draw_vis_panel(0, 0, draw_max_y - player_h, max_x);
-            draw_player_panel(draw_max_y - player_h, 0, player_h, max_x);
-        } else {
-            draw_vis_panel(0, 0, draw_max_y, max_x);
+        if (show_visualizer) {
+            if (top_h > 0) draw_vis_panel(0, 0, top_h, max_x);
         }
     } else if (is_vertical) {
-        int vis_h = draw_max_y * 40 / 100;
-        int files_h = draw_max_y - vis_h - player_h;
+        int vis_h = show_visualizer ? top_h * 40 / 100 : 0;
+        int files_h = top_h - vis_h;
         
         int play_w = max_x / 2;
         int file_w = max_x - play_w;
 
-        draw_vis_panel(0, 0, vis_h, max_x);
+        if (show_visualizer) draw_vis_panel(0, 0, vis_h, max_x);
         draw_playlist_panel(vis_h, 0, files_h, play_w);
         draw_files_panel(vis_h, play_w, files_h, file_w);
-        draw_player_panel(vis_h + files_h, 0, player_h, max_x);
     } else {
         int left_w  = max_x * 25 / 100;
         if (left_w < 30 && max_x >= 30) left_w = 30; // Min width 30
+        if (!show_visualizer) left_w = max_x / 2;
         int right_w = max_x - left_w;
-
-        int top_h = draw_max_y - player_h;
-        int play_h = top_h / 2;
-        int file_h = top_h - play_h;
         
-        draw_playlist_panel(0, 0, play_h, left_w);
-        draw_files_panel(play_h, 0, file_h, left_w);
-        
-        draw_vis_panel(0, left_w, top_h, right_w);
-        draw_player_panel(top_h, 0, player_h, max_x);
+        if (show_visualizer) {
+            int play_h = top_h / 2;
+            int file_h = top_h - play_h;
+            draw_playlist_panel(0, 0, play_h, left_w);
+            draw_files_panel(play_h, 0, file_h, left_w);
+            draw_vis_panel(0, left_w, top_h, right_w);
+        } else {
+            draw_playlist_panel(0, 0, top_h, left_w);
+            draw_files_panel(0, left_w, top_h, right_w);
+        }
     }
+    
+    if (lrc_h > 0) draw_lrc_overlay(top_h, 0, lrc_h, max_x);
+    draw_player_panel(top_h + lrc_h, 0, player_h, max_x);
     
     // Bottom help bar
     if (show_help_bar) {
@@ -149,8 +175,10 @@ static void ui_loop(void) {
         PRINT_HELP("l", "Layout");
         PRINT_HELP("m", "Mute");
         PRINT_HELP("c", "Vis");
+        PRINT_HELP("v", "Vis Toggle");
         PRINT_HELP("f", "Fullscr");
         PRINT_HELP("w", "Clear Q");
+        PRINT_HELP("y", "LRC Ovl");
         PRINT_HELP("q", "Quit");
         
         #undef PRINT_HELP
@@ -205,5 +233,6 @@ void ui_run(bool force_colors) {
     }
     
     koni_metadata_free(&ui_cache.meta);
+    if (ui_cache.lrc_doc) { lrc_free(ui_cache.lrc_doc); ui_cache.lrc_doc = NULL; }
     endwin();
 }
