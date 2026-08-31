@@ -142,4 +142,4 @@ lyrics.download_online = true
 
 ## License
 
-Licensed under GPLv3. See [LICENSE](./LICENSE) for details.
+Licensed under GPLv3. See [LICENSE](./LICENSE.txt) for details.
