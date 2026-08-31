@@ -4,6 +4,7 @@
 #include "audio.h"
 #include "state.h"
 #include "codec.h"
+#include "replaygain/replaygain.h"
 
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
@@ -44,10 +45,32 @@ void *audio_thread_func(void *arg) {
     (void)arg;
     struct timespec sleep_ts = {0, 50000000L}; // 50ms
 
+    ma_device device;
+    ma_pcm_rb ring_buffer;
+    bool device_initialized = false;
+    KoniAudioFormat current_device_fmt = {0};
+
+    char filepath[1024] = "";
+    int this_file_idx = -1;
+
     while (1) {
         PlayerCommand cmd = atomic_load(&current_cmd_atomic);
-        char filepath[1024];
-        int this_file_idx = -1;
+
+        if (cmd == CMD_QUIT) {
+            break;
+        }
+
+        // Handle manual next/prev in the audio thread
+        if (cmd == CMD_NEXT || cmd == CMD_PREV) {
+            if (player_advance_track(cmd)) {
+                cmd = CMD_PLAY;
+                atomic_store(&current_cmd_atomic, CMD_PLAY);
+            } else {
+                atomic_store(&current_cmd_atomic, CMD_STOP);
+                atomic_store(&play_state_atomic, STATE_STOPPED);
+                continue;
+            }
+        }
 
         if (cmd == CMD_PLAY) {
             atomic_store(&header_ready_for_idx, -1);
@@ -59,29 +82,48 @@ void *audio_thread_func(void *arg) {
             atomic_store(&current_cmd_atomic, CMD_NONE);
             atomic_store(&play_state_atomic, STATE_PLAYING);
             
-            // Reset metrics
+            // Reset metrics fully for manual jump
             atomic_store(&p_current_sec, 0); atomic_store(&p_total_sec, 0);
             memset(vis_ring_l, 0, sizeof(vis_ring_l)); memset(vis_ring_r, 0, sizeof(vis_ring_r));
             atomic_store(&vis_wpos, 0); atomic_store(&p_frames_consumed, 0);
-        } else if (cmd == CMD_QUIT) {
-            break;
+            
+            if (device_initialized) {
+                ma_device_stop(&device);
+                ma_pcm_rb_reset(&ring_buffer);
+            }
         }
 
         PlayState state = atomic_load(&play_state_atomic);
         if (state != STATE_PLAYING && state != STATE_PAUSED) {
+            if (device_initialized) {
+                ma_device_uninit(&device);
+                ma_pcm_rb_uninit(&ring_buffer);
+                device_initialized = false;
+            }
             nanosleep(&sleep_ts, NULL);
             continue;
         }
 
         const KoniCodecImpl* codec = koni_find_codec_by_ext(filepath);
-        if (!codec) { atomic_store(&play_state_atomic, STATE_STOPPED); continue; }
+        if (!codec) { 
+            atomic_store(&play_state_atomic, STATE_STOPPED); 
+            continue; 
+        }
 
         KoniDecoder* dec = codec->open(filepath);
-        if (!dec) { atomic_store(&play_state_atomic, STATE_STOPPED); continue; }
+        if (!dec) { 
+            atomic_store(&play_state_atomic, STATE_STOPPED); 
+            continue; 
+        }
 
-        KoniAudioFormat fmt; KoniMetadata meta;
+        KoniAudioFormat fmt; 
         codec->get_format(dec, &fmt);
-        codec->get_metadata(dec, &meta);
+        
+        KoniMetadata meta = {0};
+        uint32_t dur = 0;
+        if (codec->read_metadata) {
+            codec->read_metadata(filepath, &meta, &dur);
+        }
 
         // Save generic metadata to state
         pthread_mutex_lock(&state_mutex);
@@ -93,27 +135,49 @@ void *audio_thread_func(void *arg) {
         atomic_store(&p_total_sec, (fmt.sample_rate > 0) ? (fmt.total_samples / fmt.sample_rate) : 0);
         atomic_store(&vis_srate, fmt.sample_rate);
         atomic_store(&header_ready_for_idx, this_file_idx);
+        atomic_fetch_add(&current_track_id, 1);
 
-        ma_pcm_rb ring_buffer;
-        ma_pcm_rb_init(ma_format_s32, fmt.num_channels, fmt.sample_rate / 2, NULL, NULL, &ring_buffer);
-        
-        ma_device_config deviceConfig = ma_device_config_init(ma_device_type_playback);
-        deviceConfig.playback.format   = ma_format_s32;
-        deviceConfig.playback.channels = fmt.num_channels;
-        deviceConfig.sampleRate        = fmt.sample_rate;
-        deviceConfig.dataCallback      = data_callback;
-        deviceConfig.pUserData         = &ring_buffer;
-        
-        ma_device device;
-        if (ma_device_init(NULL, &deviceConfig, &device) != MA_SUCCESS) {
-            ma_pcm_rb_uninit(&ring_buffer); codec->close(dec); atomic_store(&play_state_atomic, STATE_STOPPED); continue;
+        if (!device_initialized || current_device_fmt.sample_rate != fmt.sample_rate || current_device_fmt.num_channels != fmt.num_channels) {
+            if (device_initialized) {
+                // Drain the remaining audio before resetting the device
+                ma_uint32 available = ma_pcm_rb_available_read(&ring_buffer);
+                while (available > 0 && atomic_load(&current_cmd_atomic) == CMD_NONE) {
+                    nanosleep(&sleep_ts, NULL);
+                    available = ma_pcm_rb_available_read(&ring_buffer);
+                }
+                ma_device_uninit(&device);
+                ma_pcm_rb_uninit(&ring_buffer);
+            }
+
+            ma_pcm_rb_init(ma_format_s32, fmt.num_channels, fmt.sample_rate / 2, NULL, NULL, &ring_buffer);
+            
+            ma_device_config deviceConfig = ma_device_config_init(ma_device_type_playback);
+            deviceConfig.playback.format   = ma_format_s32;
+            deviceConfig.playback.channels = fmt.num_channels;
+            deviceConfig.sampleRate        = fmt.sample_rate;
+            deviceConfig.dataCallback      = data_callback;
+            deviceConfig.pUserData         = &ring_buffer;
+            
+            if (ma_device_init(NULL, &deviceConfig, &device) != MA_SUCCESS) {
+                ma_pcm_rb_uninit(&ring_buffer); codec->close(dec); atomic_store(&play_state_atomic, STATE_STOPPED); continue;
+            }
+            ma_device_start(&device);
+            device_initialized = true;
+            current_device_fmt = fmt;
         }
-        ma_device_start(&device);
+        
         bool device_active = true;
+        if (ma_device_get_state(&device) != ma_device_state_started) {
+            ma_device_start(&device);
+        }
 
         int32_t *interleaved = malloc(sizeof(int32_t) * 65536 * fmt.num_channels);
         uint32_t samples_played = 0;
         int exit_loop = 0;
+        
+        RGainState rgain_state;
+        rgain_init(&rgain_state, fmt.sample_rate, fmt.num_channels);
+        rgain_set_meta(&rgain_state, meta.has_track_gain, meta.track_gain);
 
         while (samples_played < fmt.total_samples && !exit_loop) {
             cmd = atomic_load(&current_cmd_atomic);
@@ -125,20 +189,21 @@ void *audio_thread_func(void *arg) {
                 atomic_store(&current_cmd_atomic, CMD_NONE);
             }
             if (cmd == CMD_SEEK) {
-                int target_sec = atomic_load(&seek_target_sec);
+                int target_ms = atomic_load(&seek_target_ms);
                 atomic_store(&current_cmd_atomic, CMD_NONE);
-                if (target_sec >= 0) {
-                    uint64_t target_sample = (uint64_t)target_sec * fmt.sample_rate;
+                if (target_ms >= 0) {
+                    uint64_t target_sample = ((uint64_t)target_ms * fmt.sample_rate) / 1000ULL;
                     if (codec->seek(dec, target_sample)) {
                         samples_played = target_sample;
-                        memset(vis_ring_l, 0, sizeof(vis_ring_l)); memset(vis_ring_r, 0, sizeof(vis_ring_r));
-                        atomic_store(&vis_wpos, 0);
                         atomic_store(&p_current_sec, samples_played / fmt.sample_rate);
+                        atomic_store(&p_frames_consumed, target_sample);
                         
                         ma_device_stop(&device);
-                        ma_pcm_rb_uninit(&ring_buffer);
-                        ma_pcm_rb_init(ma_format_s32, fmt.num_channels, fmt.sample_rate / 2, NULL, NULL, &ring_buffer);
-                        atomic_store(&p_frames_consumed, 0);
+                        ma_pcm_rb_reset(&ring_buffer);
+                        
+                        memset(vis_ring_l, 0, sizeof(vis_ring_l)); 
+                        memset(vis_ring_r, 0, sizeof(vis_ring_r));
+                        
                         ma_device_start(&device); device_active = true;
                     }
                 }
@@ -155,7 +220,9 @@ void *audio_thread_func(void *arg) {
                  break; // EOF
             }
             
-            // Handle volume application
+            rgain_set_mode(&rgain_state, (RGainMode)atomic_load(&play_mode_rgain));
+            rgain_process(&rgain_state, interleaved, mix_samples);
+            
             int current_vol = atomic_load(&volume);
             for (uint32_t s = 0; s < mix_samples * fmt.num_channels; s++) {
                 long long val64 = ((long long)interleaved[s] * current_vol) / 100;
@@ -164,7 +231,6 @@ void *audio_thread_func(void *arg) {
                 interleaved[s] = (int32_t)val64;
             }
             
-            // Update visualizer ring buffer
             uint32_t local_wpos = atomic_load(&vis_wpos);
             for (uint32_t s = 0; s < mix_samples; s++) {
                 float vl = 0.0f, vr = 0.0f;
@@ -180,7 +246,6 @@ void *audio_thread_func(void *arg) {
             }
             atomic_store(&vis_wpos, local_wpos);
 
-            // Feed to miniaudio
             uint32_t written = 0;
             while (written < mix_samples && !exit_loop) {
                 ma_uint32 framesToWrite = mix_samples - written;
@@ -202,19 +267,40 @@ void *audio_thread_func(void *arg) {
             atomic_store(&p_current_sec, samples_played / fmt.sample_rate);
         }
         
-        ma_device_uninit(&device);
-        ma_pcm_rb_uninit(&ring_buffer);
         codec->close(dec);
         free(interleaved);
 
         cmd = atomic_load(&current_cmd_atomic);
-        if (atomic_load(&play_state_atomic) == STATE_PLAYING && cmd == CMD_NONE) {
-            atomic_store(&play_state_atomic, STATE_STOPPED);
-            atomic_store(&current_cmd_atomic, CMD_NEXT_AUTO);
+        if (!exit_loop && atomic_load(&play_state_atomic) == STATE_PLAYING && (cmd == CMD_NONE || cmd == CMD_NEXT_AUTO)) {
+            // Gapless auto-transition
+            if (player_advance_track(CMD_NEXT_AUTO)) {
+                pthread_mutex_lock(&state_mutex);
+                strncpy(filepath, playing_filepath, sizeof(filepath));
+                this_file_idx = playing_file_idx;
+                pthread_mutex_unlock(&state_mutex);
+                
+                atomic_store(&header_ready_for_idx, -1);
+                atomic_store(&p_current_sec, 0);
+                
+                // Reset frames and visualizer
+                atomic_store(&p_frames_consumed, 0);
+                atomic_store(&vis_wpos, 0);
+                memset(vis_ring_l, 0, sizeof(vis_ring_l)); 
+                memset(vis_ring_r, 0, sizeof(vis_ring_r));
+            } else {
+                atomic_store(&play_state_atomic, STATE_STOPPED);
+                atomic_store(&current_cmd_atomic, CMD_NONE);
+            }
         } else if (cmd == CMD_STOP) {
             atomic_store(&play_state_atomic, STATE_STOPPED);
             atomic_store(&current_cmd_atomic, CMD_NONE);
         }
     }
+    
+    if (device_initialized) {
+        ma_device_uninit(&device);
+        ma_pcm_rb_uninit(&ring_buffer);
+    }
+    
     return NULL;
 }

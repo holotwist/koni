@@ -53,14 +53,22 @@ void draw_files_panel(int y, int x, int h, int w) {
         else if (files[idx].is_dir) attron(COLOR_PAIR(3));
         else attron(COLOR_PAIR(2));
         
+        char formatted_name[512] = {0};
+        pthread_mutex_lock(&state_mutex);
+        format_list_item(formatted_name, sizeof(formatted_name), max_disp_len, files[idx].name, 
+                         files[idx].metadata_loaded ? &files[idx].meta : NULL, files[idx].duration_sec, files[idx].is_dir);
+        pthread_mutex_unlock(&state_mutex);
+        
         char disp_buf[1024] = {0};
+        int text_w = utf8_display_width(formatted_name);
+        
         if (idx == selected_file_idx && current_focus == FOCUS_FILES) {
-            get_marquee_text(files[idx].name, max_disp_len, ui_frame_counter, disp_buf, sizeof(disp_buf));
+            get_marquee_text(formatted_name, text_w, max_disp_len, ui_frame_counter, disp_buf, sizeof(disp_buf));
         } else {
-            get_marquee_text(files[idx].name, max_disp_len, 0, disp_buf, sizeof(disp_buf));
+            get_marquee_text(formatted_name, text_w, max_disp_len, 0, disp_buf, sizeof(disp_buf));
         }
         
-        int chars_copied = utf8_display_width(disp_buf);
+        int chars_copied = (text_w <= max_disp_len) ? text_w : max_disp_len;
         mvprintw(y + i + 3, x + 2, "%s", disp_buf);
         
         for (int p = chars_copied; p < max_disp_len; p++) printw(" ");

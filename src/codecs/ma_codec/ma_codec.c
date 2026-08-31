@@ -8,7 +8,6 @@ static const char* exts[] = { ".mp3", ".wav", ".flac", NULL };
 struct KoniDecoder {
     ma_decoder decoder;
     KoniAudioFormat fmt;
-    KoniMetadata meta;
 };
 
 static KoniDecoder* ma_open(const char* filepath) {
@@ -44,10 +43,7 @@ static bool ma_get_fmt(KoniDecoder* dec, KoniAudioFormat* fmt) {
     return true;
 }
 
-static bool ma_get_meta(KoniDecoder* dec, KoniMetadata* meta) {
-    memset(meta, 0, sizeof(KoniMetadata));
-    return true;
-}
+extern bool ma_read_metadata(const char* filepath, KoniMetadata* meta, uint32_t* duration_sec);
 
 static uint32_t ma_decode(KoniDecoder* dec, int32_t* pcm_out, uint32_t max_samples) {
     ma_uint64 framesRead = 0;
@@ -65,7 +61,7 @@ const KoniCodecImpl ma_codec_impl = {
     .open = ma_open,
     .close = ma_close,
     .get_format = ma_get_fmt,
-    .get_metadata = ma_get_meta,
+    .read_metadata = ma_read_metadata,
     .decode = ma_decode,
     .seek = ma_seek
 };

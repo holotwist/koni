@@ -2,20 +2,25 @@
 #include "ui_common.h"
 #include <string.h>
 
-void get_marquee_text(const char *text, int max_disp_len, unsigned long frame_counter, char *out_buf, size_t out_buf_size) {
+void get_marquee_text(const char *text, int text_width, int max_disp_len, unsigned long frame_counter, char *out_buf, size_t out_buf_size) {
     if (!text || max_disp_len <= 0 || out_buf_size == 0) {
         if (out_buf_size > 0) out_buf[0] = '\0';
         return;
     }
 
-    int text_width = utf8_display_width(text);
-
-    // If it fits entirely, just return the text
+    // If it fits entirely, skip all and copy it
     if (text_width <= max_disp_len) {
+        strncpy(out_buf, text, out_buf_size - 1);
+        out_buf[out_buf_size - 1] = '\0';
+        return;
+    }
+
+    // If the text shouldn't be scrolling (unselected items), just truncate and return
+    if (frame_counter == 0) {
         int bytes = utf8_byte_offset_for_width(text, max_disp_len);
         if ((size_t)bytes >= out_buf_size) bytes = out_buf_size - 1;
-        memset(out_buf, 0, out_buf_size);
-        strncpy(out_buf, text, bytes);
+        memcpy(out_buf, text, bytes);
+        out_buf[bytes] = '\0';
         return;
     }
 
@@ -43,6 +48,6 @@ void get_marquee_text(const char *text, int max_disp_len, unsigned long frame_co
     int copy_bytes = end_byte - start_byte;
     if ((size_t)copy_bytes >= out_buf_size) copy_bytes = out_buf_size - 1;
 
-    memset(out_buf, 0, out_buf_size);
-    strncpy(out_buf, repeated + start_byte, copy_bytes);
+    memcpy(out_buf, repeated + start_byte, copy_bytes);
+    out_buf[copy_bytes] = '\0';
 }

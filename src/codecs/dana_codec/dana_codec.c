@@ -39,7 +39,6 @@ struct KoniDecoder {
     struct DANAStreamingDecoderConfig cfg;
     
     KoniAudioFormat fmt;
-    KoniMetadata meta;
     
     uint32_t samples_played;
 };
@@ -184,11 +183,6 @@ static KoniDecoder* dana_open(const char* filepath) {
     dec->fmt.bitrate = dec->ss1.header.max_bit_per_second;
     dec->fmt.total_samples = dec->ss1.header.num_samples;
 
-    if (dec->ss1.header.metadata.title) dec->meta.title = strdup((char*)dec->ss1.header.metadata.title);
-    if (dec->ss1.header.metadata.artist) dec->meta.artist = strdup((char*)dec->ss1.header.metadata.artist);
-    if (dec->ss1.header.metadata.album) dec->meta.album = strdup((char*)dec->ss1.header.metadata.album);
-    if (dec->ss1.header.metadata.lyrics) dec->meta.lyrics = strdup((char*)dec->ss1.header.metadata.lyrics);
-
     return dec;
 }
 
@@ -204,11 +198,6 @@ static void dana_close(KoniDecoder* dec) {
     free_stream_state(&dec->ss1);
     if (dec->hybrid_mode) free_stream_state(&dec->ss2);
 
-    if (dec->meta.title) free(dec->meta.title);
-    if (dec->meta.artist) free(dec->meta.artist);
-    if (dec->meta.album) free(dec->meta.album);
-    if (dec->meta.lyrics) free(dec->meta.lyrics);
-
     free(dec);
 }
 
@@ -216,13 +205,7 @@ static bool dana_get_fmt(KoniDecoder* dec, KoniAudioFormat* fmt) {
     *fmt = dec->fmt; return true;
 }
 
-static bool dana_get_meta(KoniDecoder* dec, KoniMetadata* meta) {
-    if (dec->meta.title) meta->title = strdup(dec->meta.title);
-    if (dec->meta.artist) meta->artist = strdup(dec->meta.artist);
-    if (dec->meta.album) meta->album = strdup(dec->meta.album);
-    if (dec->meta.lyrics) meta->lyrics = strdup(dec->meta.lyrics);
-    return true;
-}
+extern bool dana_read_metadata(const char* filepath, KoniMetadata* meta, uint32_t* duration_sec);
 
 static uint32_t dana_decode(KoniDecoder* dec, int32_t* pcm_out, uint32_t max_samples) {
     uint32_t out_max = 16384;
@@ -320,7 +303,7 @@ const KoniCodecImpl dana_codec_impl = {
     .open = dana_open,
     .close = dana_close,
     .get_format = dana_get_fmt,
-    .get_metadata = dana_get_meta,
+    .read_metadata = dana_read_metadata,
     .decode = dana_decode,
     .seek = dana_seek
 };
@@ -330,6 +313,8 @@ const KoniCodecImpl dana_codec_impl = {
 #include <stddef.h>
 
 static const char* exts[] = { NULL };
+
+extern bool dana_read_metadata(const char* filepath, KoniMetadata* meta, uint32_t* duration_sec);
 
 static KoniDecoder* dummy_open(const char* filepath) {
     (void)filepath;
@@ -342,7 +327,7 @@ const KoniCodecImpl dana_codec_impl = {
     .open = dummy_open,
     .close = NULL,
     .get_format = NULL,
-    .get_metadata = NULL,
+    .read_metadata = NULL,
     .decode = NULL,
     .seek = NULL
 };

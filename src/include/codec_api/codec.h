@@ -18,6 +18,9 @@ typedef struct {
     char *artist;
     char *album;
     char *lyrics;
+    char *art_url;
+    bool has_track_gain;
+    float track_gain; // In decibels (dB)
 } KoniMetadata;
 
 // Opaque decoder instance
@@ -31,7 +34,7 @@ typedef struct {
     void (*close)(KoniDecoder* dec);
     
     bool (*get_format)(KoniDecoder* dec, KoniAudioFormat* fmt);
-    bool (*get_metadata)(KoniDecoder* dec, KoniMetadata* meta);
+    bool (*read_metadata)(const char* filepath, KoniMetadata* meta, uint32_t* duration_sec);
     
     // Decodes into interleaved format. Returns number of samples generated per channel.
     uint32_t (*decode)(KoniDecoder* dec, int32_t* pcm_out_interleaved, uint32_t max_samples);
