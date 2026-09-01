@@ -2,12 +2,10 @@
 #include "ui_animations.h"
 #include <string.h>
 
-void draw_playlist_panel(int y, int x, int h, int w) {
-    if (h < 5 || w < 2) return;
-    ui_draw_box(y, x, h, w, "playlist", (current_focus == FOCUS_PLAYLIST) ? 1 : 2);
+void draw_queue_panel(int y, int x, int h, int w) {
+    if (h < 4 || w < 2) return;
     
     int list_h = h - 2;
-    
     if (list_h > 0) {
         if (selected_playlist_idx < playlist_scroll_offset) {
             playlist_scroll_offset = selected_playlist_idx;
@@ -20,7 +18,7 @@ void draw_playlist_panel(int y, int x, int h, int w) {
 
     if (ui_last_playlist_idx != selected_playlist_idx) {
         ui_last_playlist_idx = selected_playlist_idx;
-        if (current_focus == FOCUS_PLAYLIST) ui_frame_counter = 0;
+        ui_frame_counter = 0;
     }
 
     int max_disp_len = w - 4;
@@ -28,9 +26,10 @@ void draw_playlist_panel(int y, int x, int h, int w) {
 
     for (int i = 0; i < list_h && i + playlist_scroll_offset < num_playlist_files; i++) {
         int idx = i + playlist_scroll_offset;
+        bool is_playing = (current_play_source == SOURCE_QUEUE && playing_file_idx == idx);
         
-        if (idx == selected_playlist_idx && current_focus == FOCUS_PLAYLIST) attron(A_REVERSE | COLOR_PAIR(1));
-        else if (idx == selected_playlist_idx) attron(A_REVERSE);
+        if (idx == selected_playlist_idx) attron(A_REVERSE | COLOR_PAIR(1));
+        else if (is_playing) attron(A_BOLD | COLOR_PAIR(4));
         else attron(COLOR_PAIR(2));
         
         char formatted_name[512] = {0};
@@ -42,7 +41,7 @@ void draw_playlist_panel(int y, int x, int h, int w) {
         char disp_buf[1024] = {0};
         int text_w = utf8_display_width(formatted_name);
         
-        if (idx == selected_playlist_idx && current_focus == FOCUS_PLAYLIST) {
+        if (idx == selected_playlist_idx) {
             get_marquee_text(formatted_name, text_w, max_disp_len, ui_frame_counter, disp_buf, sizeof(disp_buf));
         } else {
             get_marquee_text(formatted_name, text_w, max_disp_len, 0, disp_buf, sizeof(disp_buf));
@@ -50,11 +49,10 @@ void draw_playlist_panel(int y, int x, int h, int w) {
         
         int chars_copied = (text_w <= max_disp_len) ? text_w : max_disp_len;
         mvprintw(y + i + 1, x + 2, "%s", disp_buf);
-        
         for (int p = chars_copied; p < max_disp_len; p++) printw(" ");
 
-        if (idx == selected_playlist_idx && current_focus == FOCUS_PLAYLIST) attroff(A_REVERSE | COLOR_PAIR(1));
-        else if (idx == selected_playlist_idx) attroff(A_REVERSE);
+        if (idx == selected_playlist_idx) attroff(A_REVERSE | COLOR_PAIR(1));
+        else if (is_playing) attroff(A_BOLD | COLOR_PAIR(4));
         else attroff(COLOR_PAIR(2));
     }
 }
