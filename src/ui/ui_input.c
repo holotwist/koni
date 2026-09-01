@@ -62,17 +62,23 @@ bool ui_handle_input(int ch) {
             break;
             
         case '\t':
-            current_focus = (current_focus == FOCUS_FILES) ? FOCUS_PLAYLIST : FOCUS_FILES;
+            current_browser_tab = (current_browser_tab + 1) % 3;
             break;
             
+        case 'u': case 'U':
+            library_scanner_start();
+            break;
+
         case KEY_UP:
-            if (current_focus == FOCUS_FILES && selected_file_idx > 0) selected_file_idx--;
-            else if (current_focus == FOCUS_PLAYLIST && selected_playlist_idx > 0) selected_playlist_idx--;
+            if (current_browser_tab == TAB_FILES && selected_file_idx > 0) selected_file_idx--;
+            else if (current_browser_tab == TAB_QUEUE && selected_playlist_idx > 0) selected_playlist_idx--;
+            else if (current_browser_tab == TAB_MUSIC && selected_library_idx > 0) selected_library_idx--;
             break;
             
         case KEY_DOWN:
-            if (current_focus == FOCUS_FILES && selected_file_idx < num_files - 1) selected_file_idx++;
-            else if (current_focus == FOCUS_PLAYLIST && selected_playlist_idx < num_playlist_files - 1) selected_playlist_idx++;
+            if (current_browser_tab == TAB_FILES && selected_file_idx < num_files - 1) selected_file_idx++;
+            else if (current_browser_tab == TAB_QUEUE && selected_playlist_idx < num_playlist_files - 1) selected_playlist_idx++;
+            else if (current_browser_tab == TAB_MUSIC && selected_library_idx < num_library_tracks - 1) selected_library_idx++;
             break;
             
         case KEY_LEFT:
@@ -98,7 +104,7 @@ bool ui_handle_input(int ch) {
             break;
             
         case 'a':
-            if (current_focus == FOCUS_FILES && num_files > 0) {
+            if (current_browser_tab == TAB_FILES && num_files > 0) {
                 if (!files[selected_file_idx].is_dir) {
                     pthread_mutex_lock(&state_mutex);
                     if (num_playlist_files >= playlist_capacity) {
@@ -114,11 +120,28 @@ bool ui_handle_input(int ch) {
                     num_playlist_files++;
                     pthread_mutex_unlock(&state_mutex);
                 }
+            } else if (current_browser_tab == TAB_MUSIC && num_library_tracks > 0) {
+                pthread_mutex_lock(&state_mutex);
+                if (num_playlist_files >= playlist_capacity) {
+                    playlist_capacity = playlist_capacity == 0 ? 1024 : playlist_capacity * 2;
+                    playlist = realloc(playlist, sizeof(PlaylistEntry) * playlist_capacity);
+                }
+                strncpy(playlist[num_playlist_files].path, library_tracks[selected_library_idx].path, sizeof(playlist[num_playlist_files].path));
+                strncpy(playlist[num_playlist_files].name, library_tracks[selected_library_idx].name, 255);
+                playlist[num_playlist_files].display_width = utf8_display_width(library_tracks[selected_library_idx].name);
+                memset(&playlist[num_playlist_files].meta, 0, sizeof(KoniMetadata));
+                if (library_tracks[selected_library_idx].title[0]) playlist[num_playlist_files].meta.title = strdup(library_tracks[selected_library_idx].title);
+                if (library_tracks[selected_library_idx].artist[0]) playlist[num_playlist_files].meta.artist = strdup(library_tracks[selected_library_idx].artist);
+                if (library_tracks[selected_library_idx].album[0]) playlist[num_playlist_files].meta.album = strdup(library_tracks[selected_library_idx].album);
+                playlist[num_playlist_files].metadata_loaded = true;
+                playlist[num_playlist_files].duration_sec = library_tracks[selected_library_idx].duration_sec;
+                num_playlist_files++;
+                pthread_mutex_unlock(&state_mutex);
             }
             break;
             
         case 'A':
-            if (current_focus == FOCUS_FILES) {
+            if (current_browser_tab == TAB_FILES) {
                 pthread_mutex_lock(&state_mutex);
                 for (int i = 0; i < num_files; i++) {
                     if (!files[i].is_dir) {
@@ -136,11 +159,30 @@ bool ui_handle_input(int ch) {
                     }
                 }
                 pthread_mutex_unlock(&state_mutex);
+            } else if (current_browser_tab == TAB_MUSIC) {
+                pthread_mutex_lock(&state_mutex);
+                for (int i = 0; i < num_library_tracks; i++) {
+                    if (num_playlist_files >= playlist_capacity) {
+                        playlist_capacity = playlist_capacity == 0 ? 1024 : playlist_capacity * 2;
+                        playlist = realloc(playlist, sizeof(PlaylistEntry) * playlist_capacity);
+                    }
+                    strncpy(playlist[num_playlist_files].path, library_tracks[i].path, sizeof(playlist[num_playlist_files].path));
+                    strncpy(playlist[num_playlist_files].name, library_tracks[i].name, 255);
+                    playlist[num_playlist_files].display_width = utf8_display_width(library_tracks[i].name);
+                    memset(&playlist[num_playlist_files].meta, 0, sizeof(KoniMetadata));
+                    if (library_tracks[i].title[0]) playlist[num_playlist_files].meta.title = strdup(library_tracks[i].title);
+                    if (library_tracks[i].artist[0]) playlist[num_playlist_files].meta.artist = strdup(library_tracks[i].artist);
+                    if (library_tracks[i].album[0]) playlist[num_playlist_files].meta.album = strdup(library_tracks[i].album);
+                    playlist[num_playlist_files].metadata_loaded = true;
+                    playlist[num_playlist_files].duration_sec = library_tracks[i].duration_sec;
+                    num_playlist_files++;
+                }
+                pthread_mutex_unlock(&state_mutex);
             }
             break;
             
-        case 'W':
-            if (current_focus == FOCUS_PLAYLIST) {
+        case 'w': case 'W':
+            if (current_browser_tab == TAB_QUEUE) {
                 pthread_mutex_lock(&state_mutex);
                 for (int i = 0; i < num_playlist_files; i++) koni_metadata_free(&playlist[i].meta);
                 num_playlist_files = 0;
@@ -151,7 +193,7 @@ bool ui_handle_input(int ch) {
             break;
             
         case 'd': case KEY_DC: case KEY_BACKSPACE: case 127:
-            if (current_focus == FOCUS_PLAYLIST && num_playlist_files > 0) {
+            if (current_browser_tab == TAB_QUEUE && num_playlist_files > 0) {
                 pthread_mutex_lock(&state_mutex);
                 koni_metadata_free(&playlist[selected_playlist_idx].meta);
                 for (int i = selected_playlist_idx; i < num_playlist_files - 1; i++) {
@@ -159,7 +201,7 @@ bool ui_handle_input(int ch) {
                 }
                 num_playlist_files--;
                 
-                if (playing_from_playlist) {
+                if (current_play_source == SOURCE_QUEUE) {
                     if (playing_file_idx > selected_playlist_idx) playing_file_idx--;
                     history_len = 0; history_idx = -1;
                 }
@@ -172,7 +214,7 @@ bool ui_handle_input(int ch) {
             break;
             
         case 10: // Enter
-            if (current_focus == FOCUS_FILES) {
+            if (current_browser_tab == TAB_FILES) {
                 if (files[selected_file_idx].is_dir) {
                     char new_path[1024]; snprintf(new_path, sizeof(new_path), "%s/%s", current_dir, files[selected_file_idx].name);
                     if (chdir(new_path) == 0) { if (getcwd(current_dir, sizeof(current_dir)) != NULL) load_directory("."); }
@@ -181,17 +223,26 @@ bool ui_handle_input(int ch) {
                     snprintf(playing_filepath, sizeof(playing_filepath), "%s/%s", current_dir, files[selected_file_idx].name);
                     strncpy(playing_filename, files[selected_file_idx].name, 255);
                     playing_file_idx = selected_file_idx;
-                    playing_from_playlist = false;
+                    current_play_source = SOURCE_FILES;
                     history_len = 0; history_idx = -1;
                     pthread_mutex_unlock(&state_mutex);
                     atomic_store(&current_cmd_atomic, CMD_PLAY);
                 }
-            } else if (current_focus == FOCUS_PLAYLIST && num_playlist_files > 0) {
+            } else if (current_browser_tab == TAB_QUEUE && num_playlist_files > 0) {
                 pthread_mutex_lock(&state_mutex);
                 strncpy(playing_filepath, playlist[selected_playlist_idx].path, sizeof(playing_filepath));
                 strncpy(playing_filename, playlist[selected_playlist_idx].name, 255);
                 playing_file_idx = selected_playlist_idx;
-                playing_from_playlist = true;
+                current_play_source = SOURCE_QUEUE;
+                history_len = 0; history_idx = -1;
+                pthread_mutex_unlock(&state_mutex);
+                atomic_store(&current_cmd_atomic, CMD_PLAY);
+            } else if (current_browser_tab == TAB_MUSIC && num_library_tracks > 0) {
+                pthread_mutex_lock(&state_mutex);
+                strncpy(playing_filepath, library_tracks[selected_library_idx].path, sizeof(playing_filepath));
+                strncpy(playing_filename, library_tracks[selected_library_idx].name, 255);
+                playing_file_idx = selected_library_idx;
+                current_play_source = SOURCE_LIBRARY;
                 history_len = 0; history_idx = -1;
                 pthread_mutex_unlock(&state_mutex);
                 atomic_store(&current_cmd_atomic, CMD_PLAY);

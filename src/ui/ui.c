@@ -24,10 +24,12 @@ static void ui_update_state(void) {
         memset(&ui_cache.fmt, 0, sizeof(ui_cache.fmt));
         ui_cache.filename[0] = '\0';
         
-        if (!playing_from_playlist && playing_file_idx >= 0 && playing_file_idx < num_files) {
+        if (current_play_source == SOURCE_FILES && playing_file_idx >= 0 && playing_file_idx < num_files) {
             selected_file_idx = playing_file_idx;
-        } else if (playing_from_playlist && playing_file_idx >= 0 && playing_file_idx < num_playlist_files) {
+        } else if (current_play_source == SOURCE_QUEUE && playing_file_idx >= 0 && playing_file_idx < num_playlist_files) {
             selected_playlist_idx = playing_file_idx;
+        } else if (current_play_source == SOURCE_LIBRARY && playing_file_idx >= 0 && playing_file_idx < num_library_tracks) {
+            selected_library_idx = playing_file_idx;
         }
         ui_cache.idx = playing_file_idx;
         strncpy(ui_cache.filepath, playing_filepath, sizeof(ui_cache.filepath) - 1);
@@ -107,35 +109,65 @@ static void ui_loop(void) {
     
     int top_h = draw_max_y - player_h - lrc_h;
 
+    // Single left/main browser block
+    int browser_w = show_visualizer ? (max_x * 40 / 100) : max_x;
+    if (show_visualizer && browser_w < 35 && max_x >= 70) browser_w = 35;
+    int vis_w = max_x - browser_w;
+
     if (is_fullscreen) {
-        if (show_visualizer) {
-            if (top_h > 0) draw_vis_panel(0, 0, top_h, max_x);
-        }
+        if (show_visualizer && top_h > 0) draw_vis_panel(0, 0, top_h, max_x);
     } else if (is_vertical) {
-        int vis_h = show_visualizer ? top_h * 40 / 100 : 0;
-        int files_h = top_h - vis_h;
-        
-        int play_w = max_x / 2;
-        int file_w = max_x - play_w;
+        int vis_h = show_visualizer ? (top_h * 40 / 100) : 0;
+        int browser_h = top_h - vis_h;
 
         if (show_visualizer) draw_vis_panel(0, 0, vis_h, max_x);
-        draw_playlist_panel(vis_h, 0, files_h, play_w);
-        draw_files_panel(vis_h, play_w, files_h, file_w);
+
+        // Draw browser box with tabs header
+        ui_draw_box(vis_h, 0, browser_h, max_x, NULL, 1);
+        mvprintw(vis_h, 2, " ");
+        attron(current_browser_tab == TAB_QUEUE ? A_REVERSE : A_NORMAL);
+        printw("Queue (%d)", num_playlist_files);
+        attroff(current_browser_tab == TAB_QUEUE ? A_REVERSE : A_NORMAL);
+        printw(" ");
+
+        attron(current_browser_tab == TAB_MUSIC ? A_REVERSE : A_NORMAL);
+        printw("Music (%d)", num_library_tracks);
+        attroff(current_browser_tab == TAB_MUSIC ? A_REVERSE : A_NORMAL);
+        printw(" ");
+
+        attron(current_browser_tab == TAB_FILES ? A_REVERSE : A_NORMAL);
+        printw("Files");
+        attroff(current_browser_tab == TAB_FILES ? A_REVERSE : A_NORMAL);
+        printw(" ");
+
+        if (current_browser_tab == TAB_QUEUE) draw_queue_panel(vis_h, 0, browser_h, max_x);
+        else if (current_browser_tab == TAB_MUSIC) draw_musiclist_panel(vis_h, 0, browser_h, max_x);
+        else draw_files_panel(vis_h, 0, browser_h, max_x);
     } else {
-        int left_w  = max_x * 25 / 100;
-        if (left_w < 30 && max_x >= 30) left_w = 30; // Min width 30
-        if (!show_visualizer) left_w = max_x / 2;
-        int right_w = max_x - left_w;
-        
-        if (show_visualizer) {
-            int play_h = top_h / 2;
-            int file_h = top_h - play_h;
-            draw_playlist_panel(0, 0, play_h, left_w);
-            draw_files_panel(play_h, 0, file_h, left_w);
-            draw_vis_panel(0, left_w, top_h, right_w);
-        } else {
-            draw_playlist_panel(0, 0, top_h, left_w);
-            draw_files_panel(0, left_w, top_h, right_w);
+        // Horizontal, Left Single Browser, Right Visualizer/Lyrics
+        ui_draw_box(0, 0, top_h, browser_w, NULL, 1);
+        mvprintw(0, 2, " ");
+        attron(current_browser_tab == TAB_QUEUE ? A_REVERSE : A_NORMAL);
+        printw("Queue (%d)", num_playlist_files);
+        attroff(current_browser_tab == TAB_QUEUE ? A_REVERSE : A_NORMAL);
+        printw(" ");
+
+        attron(current_browser_tab == TAB_MUSIC ? A_REVERSE : A_NORMAL);
+        printw("Music (%d)", num_library_tracks);
+        attroff(current_browser_tab == TAB_MUSIC ? A_REVERSE : A_NORMAL);
+        printw(" ");
+
+        attron(current_browser_tab == TAB_FILES ? A_REVERSE : A_NORMAL);
+        printw("Files");
+        attroff(current_browser_tab == TAB_FILES ? A_REVERSE : A_NORMAL);
+        printw(" ");
+
+        if (current_browser_tab == TAB_QUEUE) draw_queue_panel(0, 0, top_h, browser_w);
+        else if (current_browser_tab == TAB_MUSIC) draw_musiclist_panel(0, 0, top_h, browser_w);
+        else draw_files_panel(0, 0, top_h, browser_w);
+
+        if (show_visualizer && vis_w > 0) {
+            draw_vis_panel(0, browser_w, top_h, vis_w);
         }
     }
     
@@ -160,21 +192,18 @@ static void ui_loop(void) {
             } \
         } while (0)
         
-        PRINT_HELP("h", "Hide");
-        PRINT_HELP("space", "Pause");
+        PRINT_HELP("Tab", "Tabs");
         PRINT_HELP("Enter", "Play");
+        PRINT_HELP("a/A", "Add/All");
+        PRINT_HELP("u", "Rescan");
+        PRINT_HELP("space", "Pause");
         PRINT_HELP("n/b", "Next/Prev");
-        PRINT_HELP("a/A", "Add/Dir");
-        PRINT_HELP("s", "Shuffle");
-        PRINT_HELP("r", "Repeat");
+        PRINT_HELP("s/r", "Shuf/Rep");
         PRINT_HELP("g", "RGain");
-        PRINT_HELP("l", "Layout");
-        PRINT_HELP("m", "Mute");
-        PRINT_HELP("c", "Vis");
-        PRINT_HELP("v", "Vis Toggle");
-        PRINT_HELP("f", "Fullscr");
-        PRINT_HELP("w", "Clear Q");
-        PRINT_HELP("y", "LRC Ovl");
+        PRINT_HELP("c", "VisMode");
+        PRINT_HELP("v", "VisTgl");
+        PRINT_HELP("w", "ClearQ");
+        PRINT_HELP("h", "HideBar");
         PRINT_HELP("q", "Quit");
         
         #undef PRINT_HELP

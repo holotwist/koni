@@ -1,5 +1,6 @@
 #include "state.h"
 #include "file_list.h"
+#include "db.h"
 #include "audio.h"
 #include "ui.h"
 #include "codec.h"
@@ -30,8 +31,11 @@ int main(int argc, char **argv) {
 
     setlocale(LC_ALL, ""); 
     config_init(); // Initialize configuration manager
+    db_init(); // Initialize SQLite cache
     curl_global_init(CURL_GLOBAL_DEFAULT);
     load_state(); // Load all the previous state
+    library_reload(); // Read database tracks into memory
+    library_scanner_start(); // Trigger background sync scan
 
     if (dir_idx != -1) { 
         if (chdir(argv[dir_idx]) != 0) perror("chdir failed"); 
@@ -60,8 +64,10 @@ int main(int argc, char **argv) {
     pthread_join(audio_thread, NULL);
     
     mpris_shutdown();
+    library_scanner_shutdown();
     save_state(); // Dump state before exiting
     file_list_shutdown();
+    db_shutdown();
     
     koni_metadata_free(&p_metadata);
     

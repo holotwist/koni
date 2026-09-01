@@ -36,7 +36,8 @@ int utf8_byte_offset_for_suffix(const char *str, int target_width);
 
 // Component draw functions
 void draw_files_panel(int y, int x, int h, int w);
-void draw_playlist_panel(int y, int x, int h, int w);
+void draw_queue_panel(int y, int x, int h, int w);
+void draw_musiclist_panel(int y, int x, int h, int w);
 void draw_vis_panel(int y, int x, int h, int w);
 void draw_player_panel(int y, int x, int h, int w);
 void draw_lrc_overlay(int y, int x, int h, int w);
