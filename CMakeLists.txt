@@ -11,6 +11,7 @@ if(PKG_CONFIG_FOUND)
 endif()
 
 find_package(CURL REQUIRED)
+find_package(SQLite3 REQUIRED)
 
 add_compile_options(-O3 -flto -ffast-math -funroll-loops -Wall -Wextra)
 add_compile_definitions(NDEBUG)
