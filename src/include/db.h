@@ -24,6 +24,7 @@ void db_shutdown(void);
 
 // Track cache operations
 bool db_get_track_mtime(const char *filepath, time_t *out_mtime);
+bool db_get_track_meta(const char *filepath, time_t mtime, KoniMetadata *out_meta, uint32_t *out_duration);
 bool db_upsert_track(const char *filepath, time_t mtime, const KoniMetadata *meta, uint32_t duration_sec);
 void db_delete_track(const char *filepath);
 void db_prune_missing_files(void);

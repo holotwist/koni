@@ -107,6 +107,39 @@ bool db_get_track_mtime(const char *filepath, time_t *out_mtime) {
     return found;
 }
 
+bool db_get_track_meta(const char *filepath, time_t mtime, KoniMetadata *out_meta, uint32_t *out_duration) {
+    pthread_mutex_lock(&db_mutex);
+    if (!db) { pthread_mutex_unlock(&db_mutex); return false; }
+
+    const char *sql = "SELECT mtime, title, artist, album, duration, has_gain, track_gain FROM tracks WHERE path = ? LIMIT 1;";
+    sqlite3_stmt *stmt;
+    bool found = false;
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, filepath, -1, SQLITE_STATIC);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            time_t cached_mtime = (time_t)sqlite3_column_int64(stmt, 0);
+            if (cached_mtime == mtime) {
+                const char *title = (const char *)sqlite3_column_text(stmt, 1);
+                const char *artist = (const char *)sqlite3_column_text(stmt, 2);
+                const char *album = (const char *)sqlite3_column_text(stmt, 3);
+                
+                if (title && title[0]) out_meta->title = strdup(title);
+                if (artist && artist[0]) out_meta->artist = strdup(artist);
+                if (album && album[0]) out_meta->album = strdup(album);
+                
+                if (out_duration) *out_duration = sqlite3_column_int(stmt, 4);
+                out_meta->has_track_gain = sqlite3_column_int(stmt, 5) ? true : false;
+                out_meta->track_gain = (float)sqlite3_column_double(stmt, 6);
+                found = true;
+            }
+        }
+        sqlite3_finalize(stmt);
+    }
+    pthread_mutex_unlock(&db_mutex);
+    return found;
+}
+
 bool db_upsert_track(const char *filepath, time_t mtime, const KoniMetadata *meta, uint32_t duration_sec) {
     pthread_mutex_lock(&db_mutex);
     if (!db) { pthread_mutex_unlock(&db_mutex); return false; }
