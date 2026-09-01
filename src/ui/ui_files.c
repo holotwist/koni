@@ -5,7 +5,6 @@
 
 void draw_files_panel(int y, int x, int h, int w) {
     if (h < 5 || w < 2) return;
-    ui_draw_box(y, x, h, w, "files", (current_focus == FOCUS_FILES) ? 1 : 2);
     
     int list_h = h - 4;
     
@@ -48,8 +47,10 @@ void draw_files_panel(int y, int x, int h, int w) {
     for (int i = 0; i < list_h && i + scroll_offset < num_files; i++) {
         int idx = i + scroll_offset;
         
-        if (idx == selected_file_idx && current_focus == FOCUS_FILES) attron(A_REVERSE | COLOR_PAIR(1));
-        else if (idx == selected_file_idx) attron(A_REVERSE);
+        bool is_playing = (current_play_source == SOURCE_FILES && playing_file_idx == idx);
+
+        if (idx == selected_file_idx) attron(A_REVERSE | COLOR_PAIR(1));
+        else if (is_playing) attron(A_BOLD | COLOR_PAIR(4));
         else if (files[idx].is_dir) attron(COLOR_PAIR(3));
         else attron(COLOR_PAIR(2));
         
@@ -62,7 +63,7 @@ void draw_files_panel(int y, int x, int h, int w) {
         char disp_buf[1024] = {0};
         int text_w = utf8_display_width(formatted_name);
         
-        if (idx == selected_file_idx && current_focus == FOCUS_FILES) {
+        if (idx == selected_file_idx) {
             get_marquee_text(formatted_name, text_w, max_disp_len, ui_frame_counter, disp_buf, sizeof(disp_buf));
         } else {
             get_marquee_text(formatted_name, text_w, max_disp_len, 0, disp_buf, sizeof(disp_buf));
@@ -73,8 +74,8 @@ void draw_files_panel(int y, int x, int h, int w) {
         
         for (int p = chars_copied; p < max_disp_len; p++) printw(" ");
 
-        if (idx == selected_file_idx && current_focus == FOCUS_FILES) attroff(A_REVERSE | COLOR_PAIR(1));
-        else if (idx == selected_file_idx) attroff(A_REVERSE);
+        if (idx == selected_file_idx) attroff(A_REVERSE | COLOR_PAIR(1));
+        else if (is_playing) attroff(A_BOLD | COLOR_PAIR(4));
         else if (files[idx].is_dir) attroff(COLOR_PAIR(3));
         else attroff(COLOR_PAIR(2));
     }
