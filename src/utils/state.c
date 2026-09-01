@@ -20,8 +20,25 @@ int num_playlist_files = 0;
 int playlist_capacity = 0;
 int selected_playlist_idx = 0;
 int playlist_scroll_offset = 0;
-bool playing_from_playlist = false;
-UIFocus current_focus = FOCUS_FILES;
+
+DBTrack *library_tracks = NULL;
+int num_library_tracks = 0;
+int selected_library_idx = 0;
+int library_scroll_offset = 0;
+
+BrowserTab current_browser_tab = TAB_QUEUE;
+PlaybackSource current_play_source = SOURCE_FILES;
+
+void library_reload(void) {
+    pthread_mutex_lock(&state_mutex);
+    if (library_tracks) {
+        db_free_tracks(library_tracks, num_library_tracks);
+        library_tracks = NULL;
+    }
+    num_library_tracks = db_load_all_tracks(&library_tracks);
+    if (selected_library_idx >= num_library_tracks) selected_library_idx = (num_library_tracks > 0) ? num_library_tracks - 1 : 0;
+    pthread_mutex_unlock(&state_mutex);
+}
 
 char playing_filepath[1024] = "";
 char playing_filename[256] = "<Empty>";
@@ -198,7 +215,11 @@ bool player_advance_track(PlayerCommand cmd) {
     bool shuffle = atomic_load(&play_mode_shuffle);
     
     pthread_mutex_lock(&state_mutex);
-    int total_items = playing_from_playlist ? num_playlist_files : num_files;
+    int total_items = 0;
+    if (current_play_source == SOURCE_QUEUE) total_items = num_playlist_files;
+    else if (current_play_source == SOURCE_LIBRARY) total_items = num_library_tracks;
+    else total_items = num_files;
+
     int next_idx = -1;
     
     if (total_items > 0) {
@@ -224,7 +245,7 @@ bool player_advance_track(PlayerCommand cmd) {
             } else {
                 if (shuffle) {
                     next_idx = rand() % total_items;
-                    if (!playing_from_playlist) {
+                    if (current_play_source == SOURCE_FILES) {
                         int attempts = 0;
                         while(files[next_idx].is_dir && attempts < total_items) {
                             next_idx = (next_idx + 1) % total_items;
@@ -239,10 +260,10 @@ bool player_advance_track(PlayerCommand cmd) {
                             if (repeat_mode == REPEAT_ALL) next_idx = 0;
                             else { next_idx = -1; break; }
                         }
-                        if (playing_from_playlist || !files[next_idx].is_dir) break;
+                        if (current_play_source != SOURCE_FILES || !files[next_idx].is_dir) break;
                         next_idx++;
                     }
-                    if (next_idx >= 0 && !playing_from_playlist && files[next_idx].is_dir) next_idx = -1;
+                    if (next_idx >= 0 && current_play_source == SOURCE_FILES && files[next_idx].is_dir) next_idx = -1;
                 }
 
                 if (next_idx >= 0) {
@@ -260,9 +281,12 @@ bool player_advance_track(PlayerCommand cmd) {
     }
     
     if (next_idx >= 0 && next_idx < total_items) {
-        if (playing_from_playlist) {
+        if (current_play_source == SOURCE_QUEUE) {
             strncpy(playing_filepath, playlist[next_idx].path, sizeof(playing_filepath));
             strncpy(playing_filename, playlist[next_idx].name, 255);
+        } else if (current_play_source == SOURCE_LIBRARY) {
+            strncpy(playing_filepath, library_tracks[next_idx].path, sizeof(playing_filepath));
+            strncpy(playing_filename, library_tracks[next_idx].name, 255);
         } else {
             snprintf(playing_filepath, sizeof(playing_filepath), "%s/%s", current_dir, files[next_idx].name);
             strncpy(playing_filename, files[next_idx].name, 255);

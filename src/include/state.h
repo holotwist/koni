@@ -29,9 +29,16 @@ typedef struct {
 } PlaylistEntry;
 
 typedef enum {
-    FOCUS_FILES,
-    FOCUS_PLAYLIST
-} UIFocus;
+    TAB_QUEUE = 0,
+    TAB_MUSIC = 1,
+    TAB_FILES = 2
+} BrowserTab;
+
+typedef enum {
+    SOURCE_FILES,
+    SOURCE_QUEUE,
+    SOURCE_LIBRARY
+} PlaybackSource;
 
 typedef enum {
     STATE_STOPPED,
@@ -67,17 +74,25 @@ extern int files_capacity;
 extern int selected_file_idx;
 extern int scroll_offset;
 
+#include "db.h"
+
 extern PlaylistEntry *playlist;
 extern int num_playlist_files;
 extern int playlist_capacity;
 extern int selected_playlist_idx;
 extern int playlist_scroll_offset;
-extern bool playing_from_playlist;
 
+extern DBTrack *library_tracks;
+extern int num_library_tracks;
+extern int selected_library_idx;
+extern int library_scroll_offset;
+
+extern BrowserTab current_browser_tab;
+extern PlaybackSource current_play_source;
+
+void library_reload(void);
 void load_state(void);
 void save_state(void);
-
-extern UIFocus current_focus;
 
 extern char playing_filepath[1024];
 extern char playing_filename[256];
