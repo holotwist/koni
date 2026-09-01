@@ -70,8 +70,11 @@ add_executable(koni
     src/codecs/ma_codec/metadata.c
     src/ui/ui_common.c
     src/ui/ui_animations.c
+    src/database/db.c
+    src/database/library_scanner.c
     src/ui/ui_files.c
-    src/ui/ui_playlist.c
+    src/ui/ui_queue.c
+    src/ui/ui_musiclist.c
     src/ui/ui_vis.c
     src/ui/ui_lrc_overlay.c
     src/ui/visualizers/vis_renderer.c
@@ -95,9 +98,9 @@ target_include_directories(koni PUBLIC
 )
 
 if(DBUS_FOUND)
-    target_include_directories(koni PUBLIC ${DBUS_INCLUDE_DIRS} ${CURL_INCLUDE_DIRS})
-    target_link_libraries(koni ncursesw pthread m ${CMAKE_DL_LIBS} ${DBUS_LIBRARIES} ${CURL_LIBRARIES})
+    target_include_directories(koni PUBLIC ${DBUS_INCLUDE_DIRS} ${CURL_INCLUDE_DIRS} ${SQLite3_INCLUDE_DIRS})
+    target_link_libraries(koni ncursesw pthread m ${CMAKE_DL_LIBS} ${DBUS_LIBRARIES} ${CURL_LIBRARIES} SQLite::SQLite3)
 else()
-    target_include_directories(koni PUBLIC ${CURL_INCLUDE_DIRS})
-    target_link_libraries(koni ncursesw pthread m ${CMAKE_DL_LIBS} ${CURL_LIBRARIES})
+    target_include_directories(koni PUBLIC ${CURL_INCLUDE_DIRS} ${SQLite3_INCLUDE_DIRS})
+    target_link_libraries(koni ncursesw pthread m ${CMAKE_DL_LIBS} ${CURL_LIBRARIES} SQLite::SQLite3)
 endif()
