@@ -26,7 +26,7 @@ int num_library_tracks = 0;
 int selected_library_idx = 0;
 int library_scroll_offset = 0;
 
-BrowserTab current_browser_tab = TAB_QUEUE;
+BrowserTab current_browser_tab = TAB_MUSIC;
 PlaybackSource current_play_source = SOURCE_FILES;
 
 void library_reload(void) {

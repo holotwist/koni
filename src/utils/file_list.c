@@ -4,6 +4,7 @@
 #include "file_list.h"
 #include "state.h"
 #include "codec.h"
+#include "db.h"
 #include "ui_common.h"
 #include <dirent.h>
 #include <sys/stat.h>
@@ -57,9 +58,24 @@ static void* metadata_worker(void* arg) {
         
         KoniMetadata meta = {0};
         uint32_t duration = 0;
-        const KoniCodecImpl* codec = koni_find_codec_by_ext(filepath);
-        if (codec && codec->read_metadata) {
-            codec->read_metadata(filepath, &meta, &duration);
+        struct stat st;
+        bool loaded = false;
+
+        if (stat(filepath, &st) == 0) {
+            // Check DB cache first
+            if (db_get_track_meta(filepath, st.st_mtime, &meta, &duration)) {
+                loaded = true;
+            }
+        }
+
+        if (!loaded) {
+            const KoniCodecImpl* codec = koni_find_codec_by_ext(filepath);
+            if (codec && codec->read_metadata) {
+                codec->read_metadata(filepath, &meta, &duration);
+                if (stat(filepath, &st) == 0) {
+                    db_upsert_track(filepath, st.st_mtime, &meta, duration);
+                }
+            }
         }
         
         pthread_mutex_lock(&state_mutex);
