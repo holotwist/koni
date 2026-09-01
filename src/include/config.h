@@ -7,6 +7,7 @@ typedef struct {
     bool online_lyrics;
     bool online_lyrics_asked;
     char lyrics_custom_path[1024];
+    char music_directories[2048];
     bool download_online_lyrics;
     bool download_online_lyrics_asked;
 } KoniConfig;

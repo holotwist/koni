@@ -42,7 +42,23 @@ static void parse_ini_file(const char* filepath, const char* home) {
         if (key && val) {
             trim_string(&key);
             trim_string(&val);
-            if (strcmp(key, "lyrics.custom_path") == 0) {
+            if (strcmp(key, "music_directories") == 0 || strcmp(key, "music_dir") == 0) {
+                char expanded[2048] = "";
+                char *dir_tok = strtok(val, ",;");
+                while (dir_tok) {
+                    while (*dir_tok == ' ' || *dir_tok == '\t') dir_tok++;
+                    char dir_buf[1024];
+                    if (strncmp(dir_tok, "~/", 2) == 0 && home) {
+                        snprintf(dir_buf, sizeof(dir_buf), "%s/%s", home, dir_tok + 2);
+                    } else {
+                        snprintf(dir_buf, sizeof(dir_buf), "%s", dir_tok);
+                    }
+                    if (expanded[0] != '\0') strncat(expanded, ",", sizeof(expanded) - strlen(expanded) - 1);
+                    strncat(expanded, dir_buf, sizeof(expanded) - strlen(expanded) - 1);
+                    dir_tok = strtok(NULL, ",;");
+                }
+                strncpy(app_config.music_directories, expanded, sizeof(app_config.music_directories) - 1);
+            } else if (strcmp(key, "lyrics.custom_path") == 0) {
                 if (strncmp(val, "~/", 2) == 0 && home) {
                     snprintf(app_config.lyrics_custom_path, sizeof(app_config.lyrics_custom_path), "%s/%s", home, val + 2);
                 } else {
@@ -80,6 +96,7 @@ void config_init(void) {
     if (!home) return;
     
     snprintf(app_config.lyrics_custom_path, sizeof(app_config.lyrics_custom_path), "%s/Music/lyrics", home);
+    snprintf(app_config.music_directories, sizeof(app_config.music_directories), "%s/Music", home);
     
     char config_dir[1024];
     snprintf(config_dir, sizeof(config_dir), "%s/.config/koni/", home);
