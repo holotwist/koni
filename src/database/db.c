@@ -13,6 +13,17 @@
 static sqlite3 *db = NULL;
 static pthread_mutex_t db_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+static void sql_basename(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
+    (void)argc;
+    const unsigned char *text = sqlite3_value_text(argv[0]);
+    if (!text) {
+        sqlite3_result_null(ctx);
+        return;
+    }
+    const char *slash = strrchr((const char *)text, '/');
+    sqlite3_result_text(ctx, slash ? slash + 1 : (const char *)text, -1, SQLITE_TRANSIENT);
+}
+
 static void ensure_dir(const char *path) {
     char tmp[1024];
     snprintf(tmp, sizeof(tmp), "%s", path);
@@ -46,6 +57,9 @@ bool db_init(void) {
         pthread_mutex_unlock(&db_mutex);
         return false;
     }
+
+    // Register custom basename function for path-to-filename fallback sorting
+    sqlite3_create_function(db, "basename", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, sql_basename, NULL, NULL);
 
     // Optimize SQLite for high-read
     sqlite3_exec(db, "PRAGMA journal_mode = WAL;", NULL, NULL, NULL);
@@ -218,12 +232,12 @@ void db_prune_missing_files(void) {
 
 const char* db_get_sort_name(DBSortMode mode) {
     switch (mode) {
-        case DB_SORT_ARTIST_ALBUM: return "Artist / Album";
         case DB_SORT_TITLE:        return "Title";
+        case DB_SORT_ARTIST_ALBUM: return "Artist / Album";
         case DB_SORT_ALBUM:        return "Album";
         case DB_SORT_DURATION:     return "Duration";
         case DB_SORT_PATH:         return "File Path";
-        default:                   return "Default";
+        default:                   return "Title";
     }
 }
 
@@ -238,20 +252,20 @@ int db_load_all_tracks(DBTrack **out_tracks, DBSortMode sort_mode) {
     const char *order_clause;
     switch (sort_mode) {
         case DB_SORT_TITLE:
-            order_clause = "title COLLATE NOCASE ASC, artist COLLATE NOCASE ASC, path ASC";
+        default:
+            order_clause = "CASE WHEN title IS NOT NULL AND title != '' THEN title ELSE basename(path) END COLLATE NOCASE ASC, artist COLLATE NOCASE ASC, path ASC";
+            break;
+        case DB_SORT_ARTIST_ALBUM:
+            order_clause = "artist COLLATE NOCASE, album COLLATE NOCASE, (CASE WHEN title IS NOT NULL AND title != '' THEN title ELSE basename(path) END) COLLATE NOCASE, path ASC";
             break;
         case DB_SORT_ALBUM:
-            order_clause = "album COLLATE NOCASE ASC, artist COLLATE NOCASE ASC, title COLLATE NOCASE ASC, path ASC";
+            order_clause = "album COLLATE NOCASE ASC, artist COLLATE NOCASE ASC, (CASE WHEN title IS NOT NULL AND title != '' THEN title ELSE basename(path) END) COLLATE NOCASE ASC, path ASC";
             break;
         case DB_SORT_DURATION:
-            order_clause = "duration DESC, artist COLLATE NOCASE ASC, title COLLATE NOCASE ASC";
+            order_clause = "duration DESC, artist COLLATE NOCASE ASC, (CASE WHEN title IS NOT NULL AND title != '' THEN title ELSE basename(path) END) COLLATE NOCASE ASC";
             break;
         case DB_SORT_PATH:
             order_clause = "path COLLATE NOCASE ASC";
-            break;
-        case DB_SORT_ARTIST_ALBUM:
-        default:
-            order_clause = "artist COLLATE NOCASE, album COLLATE NOCASE, title COLLATE NOCASE, path ASC";
             break;
     }
 

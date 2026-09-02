@@ -25,7 +25,7 @@ DBTrack *library_tracks = NULL;
 int num_library_tracks = 0;
 int selected_library_idx = 0;
 int library_scroll_offset = 0;
-DBSortMode current_library_sort = DB_SORT_ARTIST_ALBUM;
+DBSortMode current_library_sort = DB_SORT_TITLE;
 
 ActiveFolderContext active_folder = { .dir = "", .file_names = NULL, .count = 0 };
 PlaybackSource base_play_source = SOURCE_NONE;

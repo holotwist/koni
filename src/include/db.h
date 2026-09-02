@@ -30,8 +30,8 @@ void db_delete_track(const char *filepath);
 void db_prune_missing_files(void);
 
 typedef enum {
-    DB_SORT_ARTIST_ALBUM = 0,
-    DB_SORT_TITLE,
+    DB_SORT_TITLE = 0,
+    DB_SORT_ARTIST_ALBUM,
     DB_SORT_ALBUM,
     DB_SORT_DURATION,
     DB_SORT_PATH,
