@@ -274,13 +274,14 @@ bool ui_handle_input(int ch) {
                     config_remove_music_dir(target_path);
                     library_scanner_start();
                 } else {
-                    char parent[1024];
-                    if (config_find_parent_music_dir(target_path, parent, sizeof(parent))) {
+                    char *parent = NULL;
+                    if (config_find_parent_music_dir(target_path, &parent)) {
                         // Superior folder already selected: safeguard prompt
                         folder_dialog.active = true;
                         snprintf(folder_dialog.message, sizeof(folder_dialog.message),
-                                 "Parent '%.40s' is already scanned. Add anyway? (y/n)", parent);
+                                 "Parent '%.40s' is already scanned. Add anyway? (y/n)", parent ? parent : "");
                         strncpy(folder_dialog.target_path, target_path, sizeof(folder_dialog.target_path) - 1);
+                        free(parent);
                     } else {
                         config_add_music_dir(target_path);
                         library_scanner_start();

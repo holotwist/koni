@@ -62,24 +62,16 @@ static void* scanner_worker(void *arg) {
     // Prune deleted tracks first
     db_prune_missing_files();
 
-    char dirs_copy[2048];
-    strncpy(dirs_copy, app_config.music_directories, sizeof(dirs_copy) - 1);
-    dirs_copy[sizeof(dirs_copy) - 1] = '\0';
-
-    char *token = strtok(dirs_copy, ",;");
-    while (token && scanner_running) {
-        while (*token == ' ' || *token == '\t') token++;
-        char *end = token + strlen(token) - 1;
-        while (end > token && (*end == ' ' || *end == '\t')) *end-- = '\0';
-
-        if (token[0] != '\0') {
-            char parent_dir[1024];
-            // If a superior folder is already configured, skip scanning this subfolder directly
-            if (!config_find_parent_music_dir(token, parent_dir, sizeof(parent_dir))) {
-                scan_directory_recursive(token);
+    for (int i = 0; i < app_config.num_music_dirs && scanner_running; i++) {
+        const char *dir = app_config.music_dirs[i];
+        if (dir && dir[0] != '\0') {
+            char *parent_dir = NULL;
+            // If an ancestor folder is already configured, skip scanning this subfolder directly
+            if (!config_find_parent_music_dir(dir, &parent_dir)) {
+                scan_directory_recursive(dir);
             }
+            if (parent_dir) free(parent_dir);
         }
-        token = strtok(NULL, ",;");
     }
 
     scanner_in_progress = false;

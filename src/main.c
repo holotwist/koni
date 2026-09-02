@@ -68,6 +68,7 @@ int main(int argc, char **argv) {
     save_state(); // Dump state before exiting
     file_list_shutdown();
     db_shutdown();
+    config_cleanup();
     
     koni_metadata_free(&p_metadata);
     
