@@ -87,6 +87,13 @@ extern int num_library_tracks;
 extern int selected_library_idx;
 extern int library_scroll_offset;
 
+typedef struct {
+    bool active;
+    char message[256];
+    char target_path[1024];
+} FolderDialog;
+
+extern FolderDialog folder_dialog;
 extern BrowserTab current_browser_tab;
 extern PlaybackSource current_play_source;
 

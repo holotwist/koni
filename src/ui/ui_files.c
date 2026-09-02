@@ -1,6 +1,7 @@
 #include "ui_common.h"
 #include "ui_animations.h"
 #include "file_list.h"
+#include "config.h"
 #include <string.h>
 
 void draw_files_panel(int y, int x, int h, int w) {
@@ -55,9 +56,20 @@ void draw_files_panel(int y, int x, int h, int w) {
         else attron(COLOR_PAIR(2));
         
         char formatted_name[512] = {0};
+        char item_path[1024];
+        snprintf(item_path, sizeof(item_path), "%s/%s", current_dir, files[idx].name);
+        bool is_selected_dir = files[idx].is_dir && config_is_music_dir(item_path);
+
         pthread_mutex_lock(&state_mutex);
-        format_list_item(formatted_name, sizeof(formatted_name), max_disp_len, files[idx].name, 
-                         files[idx].metadata_loaded ? &files[idx].meta : NULL, files[idx].duration_sec, files[idx].is_dir);
+        if (is_selected_dir) {
+            char tagged_name[300];
+            snprintf(tagged_name, sizeof(tagged_name), "%s  (Selected)", files[idx].name);
+            format_list_item(formatted_name, sizeof(formatted_name), max_disp_len, tagged_name, 
+                             NULL, 0, true);
+        } else {
+            format_list_item(formatted_name, sizeof(formatted_name), max_disp_len, files[idx].name, 
+                             files[idx].metadata_loaded ? &files[idx].meta : NULL, files[idx].duration_sec, files[idx].is_dir);
+        }
         pthread_mutex_unlock(&state_mutex);
         
         char disp_buf[1024] = {0};
