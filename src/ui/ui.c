@@ -85,6 +85,49 @@ static void ui_update_state(void) {
     else ui_cache.smooth_rpos += nominal_advance + (diff / 5); 
 }
 
+typedef struct {
+    const char *key;
+    const char *desc;
+} HelpItem;
+
+static const HelpItem help_items[] = {
+    {"h", "Hide"},
+    {"Tab", "Tabs"},
+    {"space", "Pause"},
+    {"Enter", "Play"},
+    {"n/b", "Next/Prev"},
+    {"a/A", "Add/All"},
+    {"u", "Rescan"},
+    {"s", "Shuffle"},
+    {"r", "Repeat"},
+    {"g", "RGain"},
+    {"l", "Layout"},
+    {"m", "Mute"},
+    {"c", "Vis"},
+    {"v", "Vis Toggle"},
+    {"f", "Fullscr"},
+    {"w", "Clear Q"},
+    {"y", "LRC Ovl"},
+    {"q", "Quit"}
+};
+
+static int get_help_bar_lines(int max_x) {
+    if (!show_help_bar || max_x < 10) return 0;
+    int lines = 1;
+    int hx = 1;
+    size_t count = sizeof(help_items) / sizeof(help_items[0]);
+
+    for (size_t i = 0; i < count; i++) {
+        int item_len = (int)strlen(help_items[i].key) + (int)strlen(help_items[i].desc) + 3;
+        if (hx + item_len >= max_x - 1) {
+            lines++;
+            hx = 1;
+        }
+        hx += item_len;
+    }
+    return lines;
+}
+
 static void ui_loop(void) {
     if (force_redraw) {
         erase();
@@ -97,8 +140,8 @@ static void ui_loop(void) {
     int max_y, max_x;
     getmaxyx(stdscr, max_y, max_x);
 
-    int draw_max_y = max_y;
-    if (show_help_bar) draw_max_y -= 1;
+    int help_lines = get_help_bar_lines(max_x);
+    int draw_max_y = max_y - help_lines;
 
     bool is_vertical = (draw_max_y * 2 > max_x) || force_vertical_layout;
     int player_h = 5;
@@ -175,38 +218,34 @@ static void ui_loop(void) {
     draw_player_panel(top_h + lrc_h, 0, player_h, max_x);
     
     // Bottom help bar
-    if (show_help_bar) {
-        mvhline(max_y - 1, 0, ' ', max_x); 
+    if (show_help_bar && help_lines > 0) {
+        int start_y = max_y - help_lines;
+        for (int row = 0; row < help_lines; row++) {
+            mvhline(start_y + row, 0, ' ', max_x);
+        }
+
+        int curr_y = start_y;
         int hx = 1;
-        
-        #define PRINT_HELP(key, desc) do { \
-            if (hx < max_x - 15) { \
-                attron(COLOR_PAIR(4) | A_BOLD); \
-                mvprintw(max_y - 1, hx, "%s", key); \
-                hx += strlen(key); \
-                attroff(COLOR_PAIR(4) | A_BOLD); \
-                attron(COLOR_PAIR(2)); \
-                mvprintw(max_y - 1, hx, " %s  ", desc); \
-                hx += strlen(desc) + 3; \
-                attroff(COLOR_PAIR(2)); \
-            } \
-        } while (0)
-        
-        PRINT_HELP("Tab", "Tabs");
-        PRINT_HELP("Enter", "Play");
-        PRINT_HELP("a/A", "Add/All");
-        PRINT_HELP("u", "Rescan");
-        PRINT_HELP("space", "Pause");
-        PRINT_HELP("n/b", "Next/Prev");
-        PRINT_HELP("s/r", "Shuf/Rep");
-        PRINT_HELP("g", "RGain");
-        PRINT_HELP("c", "VisMode");
-        PRINT_HELP("v", "VisTgl");
-        PRINT_HELP("w", "ClearQ");
-        PRINT_HELP("h", "HideBar");
-        PRINT_HELP("q", "Quit");
-        
-        #undef PRINT_HELP
+        size_t count = sizeof(help_items) / sizeof(help_items[0]);
+
+        for (size_t i = 0; i < count; i++) {
+            int item_len = (int)strlen(help_items[i].key) + (int)strlen(help_items[i].desc) + 3;
+            if (hx + item_len >= max_x - 1 && hx > 1) {
+                curr_y++;
+                hx = 1;
+            }
+            if (curr_y < max_y) {
+                attron(COLOR_PAIR(4) | A_BOLD);
+                mvprintw(curr_y, hx, "%s", help_items[i].key);
+                hx += strlen(help_items[i].key);
+                attroff(COLOR_PAIR(4) | A_BOLD);
+
+                attron(COLOR_PAIR(2));
+                mvprintw(curr_y, hx, " %s  ", help_items[i].desc);
+                hx += strlen(help_items[i].desc) + 3;
+                attroff(COLOR_PAIR(2));
+            }
+        }
     }
     
     // Overlay safeguard confirmation dialog if active
