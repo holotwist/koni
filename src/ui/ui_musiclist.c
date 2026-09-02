@@ -6,6 +6,13 @@
 void draw_musiclist_panel(int y, int x, int h, int w) {
     if (h < 4 || w < 2) return;
 
+    int sort_str_len = (int)strlen(db_get_sort_name(current_library_sort)) + 8;
+    if (w > sort_str_len + 30) {
+        attron(A_DIM | COLOR_PAIR(2));
+        mvprintw(y, x + w - sort_str_len - 2, "[Sort: %s]", db_get_sort_name(current_library_sort));
+        attroff(A_DIM | COLOR_PAIR(2));
+    }
+
     int list_h = h - 2;
     if (list_h > 0) {
         if (selected_library_idx < library_scroll_offset) {

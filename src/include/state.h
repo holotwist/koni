@@ -35,6 +35,7 @@ typedef enum {
 } BrowserTab;
 
 typedef enum {
+    SOURCE_NONE = 0,
     SOURCE_FILES,
     SOURCE_QUEUE,
     SOURCE_LIBRARY
@@ -86,6 +87,18 @@ extern DBTrack *library_tracks;
 extern int num_library_tracks;
 extern int selected_library_idx;
 extern int library_scroll_offset;
+extern DBSortMode current_library_sort;
+
+// Playback session storage for Files context
+typedef struct {
+    char dir[1024];
+    char **file_names;
+    int count;
+} ActiveFolderContext;
+
+extern ActiveFolderContext active_folder;
+extern PlaybackSource base_play_source;
+extern int base_playing_idx;
 
 typedef struct {
     bool active;

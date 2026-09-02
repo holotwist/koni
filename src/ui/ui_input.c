@@ -83,6 +83,15 @@ bool ui_handle_input(int ch) {
             library_scanner_start();
             break;
 
+        case 'o': case 'O':
+            if (current_browser_tab == TAB_MUSIC) {
+                current_library_sort = (DBSortMode)((current_library_sort + 1) % DB_SORT_COUNT);
+                library_reload();
+                config_save();
+                force_redraw = true;
+            }
+            break;
+
         case KEY_UP:
             if (current_browser_tab == TAB_FILES && selected_file_idx > 0) selected_file_idx--;
             else if (current_browser_tab == TAB_QUEUE && selected_playlist_idx > 0) selected_playlist_idx--;
@@ -234,10 +243,38 @@ bool ui_handle_input(int ch) {
                     if (chdir(new_path) == 0) { if (getcwd(current_dir, sizeof(current_dir)) != NULL) load_directory("."); }
                 } else {
                     pthread_mutex_lock(&state_mutex);
+                    // Snapshot the playable audio files of the current folder context
+                    for (int i = 0; i < active_folder.count; i++) free(active_folder.file_names[i]);
+                    free(active_folder.file_names);
+                    active_folder.file_names = NULL;
+                    active_folder.count = 0;
+                    strncpy(active_folder.dir, current_dir, sizeof(active_folder.dir) - 1);
+
+                    int active_idx = 0;
+                    int playable_count = 0;
+                    for (int i = 0; i < num_files; i++) {
+                        if (!files[i].is_dir) playable_count++;
+                    }
+
+                    if (playable_count > 0) {
+                        active_folder.file_names = malloc(sizeof(char*) * playable_count);
+                        int w_idx = 0;
+                        for (int i = 0; i < num_files; i++) {
+                            if (!files[i].is_dir) {
+                                active_folder.file_names[w_idx] = strdup(files[i].name);
+                                if (i == selected_file_idx) active_idx = w_idx;
+                                w_idx++;
+                            }
+                        }
+                        active_folder.count = w_idx;
+                    }
+
                     snprintf(playing_filepath, sizeof(playing_filepath), "%s/%s", current_dir, files[selected_file_idx].name);
                     strncpy(playing_filename, files[selected_file_idx].name, 255);
-                    playing_file_idx = selected_file_idx;
+                    playing_file_idx = active_idx;
                     current_play_source = SOURCE_FILES;
+                    base_play_source = SOURCE_NONE;
+                    base_playing_idx = -1;
                     history_len = 0; history_idx = -1;
                     pthread_mutex_unlock(&state_mutex);
                     atomic_store(&current_cmd_atomic, CMD_PLAY);

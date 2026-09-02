@@ -29,8 +29,19 @@ bool db_upsert_track(const char *filepath, time_t mtime, const KoniMetadata *met
 void db_delete_track(const char *filepath);
 void db_prune_missing_files(void);
 
+typedef enum {
+    DB_SORT_ARTIST_ALBUM = 0,
+    DB_SORT_TITLE,
+    DB_SORT_ALBUM,
+    DB_SORT_DURATION,
+    DB_SORT_PATH,
+    DB_SORT_COUNT
+} DBSortMode;
+
+const char* db_get_sort_name(DBSortMode mode);
+
 // Query operations
-int db_load_all_tracks(DBTrack **out_tracks);
+int db_load_all_tracks(DBTrack **out_tracks, DBSortMode sort_mode);
 void db_free_tracks(DBTrack *tracks, int count);
 
 // Scanner background thread control

@@ -208,7 +208,18 @@ void db_prune_missing_files(void) {
     pthread_mutex_unlock(&db_mutex);
 }
 
-int db_load_all_tracks(DBTrack **out_tracks) {
+const char* db_get_sort_name(DBSortMode mode) {
+    switch (mode) {
+        case DB_SORT_ARTIST_ALBUM: return "Artist / Album";
+        case DB_SORT_TITLE:        return "Title";
+        case DB_SORT_ALBUM:        return "Album";
+        case DB_SORT_DURATION:     return "Duration";
+        case DB_SORT_PATH:         return "File Path";
+        default:                   return "Default";
+    }
+}
+
+int db_load_all_tracks(DBTrack **out_tracks, DBSortMode sort_mode) {
     pthread_mutex_lock(&db_mutex);
     if (!db) { 
         *out_tracks = NULL;
@@ -216,7 +227,31 @@ int db_load_all_tracks(DBTrack **out_tracks) {
         return 0; 
     }
 
-    const char *sql = "SELECT id, path, mtime, title, artist, album, duration, has_gain, track_gain FROM tracks ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, title COLLATE NOCASE, path ASC;";
+    const char *order_clause;
+    switch (sort_mode) {
+        case DB_SORT_TITLE:
+            order_clause = "title COLLATE NOCASE ASC, artist COLLATE NOCASE ASC, path ASC";
+            break;
+        case DB_SORT_ALBUM:
+            order_clause = "album COLLATE NOCASE ASC, artist COLLATE NOCASE ASC, title COLLATE NOCASE ASC, path ASC";
+            break;
+        case DB_SORT_DURATION:
+            order_clause = "duration DESC, artist COLLATE NOCASE ASC, title COLLATE NOCASE ASC";
+            break;
+        case DB_SORT_PATH:
+            order_clause = "path COLLATE NOCASE ASC";
+            break;
+        case DB_SORT_ARTIST_ALBUM:
+        default:
+            order_clause = "artist COLLATE NOCASE, album COLLATE NOCASE, title COLLATE NOCASE, path ASC";
+            break;
+    }
+
+    char sql[512];
+    snprintf(sql, sizeof(sql),
+             "SELECT id, path, mtime, title, artist, album, duration, has_gain, track_gain "
+             "FROM tracks ORDER BY %s;", order_clause);
+
     sqlite3_stmt *stmt;
     int count = 0;
     int capacity = 256;
