@@ -209,6 +209,27 @@ static void ui_loop(void) {
         #undef PRINT_HELP
     }
     
+    // Overlay safeguard confirmation dialog if active
+    if (folder_dialog.active) {
+        int dw = 60;
+        int dh = 6;
+        int dx = (max_x - dw) / 2;
+        int dy = (draw_max_y - dh) / 2;
+        if (dx < 0) dx = 0;
+        if (dy < 0) dy = 0;
+
+        ui_draw_box(dy, dx, dh, dw, "Folder Selection Warning", 4);
+        for (int row = 1; row < dh - 1; row++) mvhline(dy + row, dx + 1, ' ', dw - 2);
+
+        attron(COLOR_PAIR(2));
+        mvprintw(dy + 2, dx + 3, "%s", folder_dialog.message);
+        attroff(COLOR_PAIR(2));
+
+        attron(A_BOLD | COLOR_PAIR(4));
+        mvprintw(dy + 3, dx + 3, "[Y] Confirm / [N] Cancel");
+        attroff(A_BOLD | COLOR_PAIR(4));
+    }
+
     refresh();
     vis_needs_full_redraw = false;
 }

@@ -14,6 +14,20 @@
 #include <stdlib.h>
 
 bool ui_handle_input(int ch) {
+    // Handle active confirmation dialog for folder selection
+    if (folder_dialog.active) {
+        if (ch == 'y' || ch == 'Y') {
+            config_add_music_dir(folder_dialog.target_path);
+            folder_dialog.active = false;
+            library_scanner_start();
+            return true;
+        } else if (ch == 'n' || ch == 'N' || ch == 27) { // 'n' or Escape
+            folder_dialog.active = false;
+            return true;
+        }
+        return true; // Block other interactions while modal is shown
+    }
+
     if (active_tab == 2) {
         if (!app_config.online_lyrics_asked) {
             if (ch == 'y' || ch == 'Y') {
@@ -249,7 +263,33 @@ bool ui_handle_input(int ch) {
             }
             break;
             
-        case 's': case 'S': atomic_store(&play_mode_shuffle, !atomic_load(&play_mode_shuffle)); break;
+        case 's': case 'S':
+            if (current_browser_tab == TAB_FILES && num_files > 0 && files[selected_file_idx].is_dir) {
+                if (strcmp(files[selected_file_idx].name, "..") == 0) break;
+                char target_path[1024];
+                snprintf(target_path, sizeof(target_path), "%s/%s", current_dir, files[selected_file_idx].name);
+
+                if (config_is_music_dir(target_path)) {
+                    // Already selected: remove it and rescan
+                    config_remove_music_dir(target_path);
+                    library_scanner_start();
+                } else {
+                    char parent[1024];
+                    if (config_find_parent_music_dir(target_path, parent, sizeof(parent))) {
+                        // Superior folder already selected: safeguard prompt
+                        folder_dialog.active = true;
+                        snprintf(folder_dialog.message, sizeof(folder_dialog.message),
+                                 "Parent '%.40s' is already scanned. Add anyway? (y/n)", parent);
+                        strncpy(folder_dialog.target_path, target_path, sizeof(folder_dialog.target_path) - 1);
+                    } else {
+                        config_add_music_dir(target_path);
+                        library_scanner_start();
+                    }
+                }
+            } else {
+                atomic_store(&play_mode_shuffle, !atomic_load(&play_mode_shuffle));
+            }
+            break;
         case 'r': case 'R': {
             int r = atomic_load(&play_mode_repeat);
             atomic_store(&play_mode_repeat, (r + 1) % 3);
