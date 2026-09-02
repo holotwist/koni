@@ -191,20 +191,28 @@ void db_prune_missing_files(void) {
     if (!db) { pthread_mutex_unlock(&db_mutex); return; }
 
     const char *sql = "SELECT path FROM tracks;";
+    const char *del_sql = "DELETE FROM tracks WHERE path = ?;";
     sqlite3_stmt *stmt;
+    sqlite3_stmt *del_stmt = NULL;
+
+    if (sqlite3_prepare_v2(db, del_sql, -1, &del_stmt, NULL) != SQLITE_OK) {
+        pthread_mutex_unlock(&db_mutex);
+        return;
+    }
 
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             const char *path = (const char *)sqlite3_column_text(stmt, 0);
             if (path && access(path, F_OK) != 0) {
                 // File no longer exists, remove from DB
-                char del_sql[1024];
-                snprintf(del_sql, sizeof(del_sql), "DELETE FROM tracks WHERE path = %Q;", path);
-                sqlite3_exec(db, del_sql, NULL, NULL, NULL);
+                sqlite3_reset(del_stmt);
+                sqlite3_bind_text(del_stmt, 1, path, -1, SQLITE_STATIC);
+                sqlite3_step(del_stmt);
             }
         }
         sqlite3_finalize(stmt);
     }
+    if (del_stmt) sqlite3_finalize(del_stmt);
     pthread_mutex_unlock(&db_mutex);
 }
 
