@@ -51,6 +51,7 @@ void draw_files_panel(int y, int x, int h, int w) {
         char item_path[1024];
         snprintf(item_path, sizeof(item_path), "%s/%s", current_dir, files[idx].name);
         bool is_playing = (current_play_source == SOURCE_FILES && strcmp(playing_filepath, item_path) == 0);
+        bool is_selected_dir = files[idx].is_dir && config_is_music_dir(item_path);
 
         if (idx == selected_file_idx) attron(A_REVERSE | COLOR_PAIR(1));
         else if (is_playing) attron(A_BOLD | COLOR_PAIR(4));
@@ -58,9 +59,6 @@ void draw_files_panel(int y, int x, int h, int w) {
         else attron(COLOR_PAIR(2));
         
         char formatted_name[512] = {0};
-        char item_path[1024];
-        snprintf(item_path, sizeof(item_path), "%s/%s", current_dir, files[idx].name);
-        bool is_selected_dir = files[idx].is_dir && config_is_music_dir(item_path);
 
         pthread_mutex_lock(&state_mutex);
         if (is_selected_dir) {
