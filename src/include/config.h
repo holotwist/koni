@@ -2,6 +2,7 @@
 #define KONI_CONFIG_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 typedef struct {
     bool online_lyrics;
