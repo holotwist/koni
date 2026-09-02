@@ -48,7 +48,9 @@ void draw_files_panel(int y, int x, int h, int w) {
     for (int i = 0; i < list_h && i + scroll_offset < num_files; i++) {
         int idx = i + scroll_offset;
         
-        bool is_playing = (current_play_source == SOURCE_FILES && playing_file_idx == idx);
+        char item_path[1024];
+        snprintf(item_path, sizeof(item_path), "%s/%s", current_dir, files[idx].name);
+        bool is_playing = (current_play_source == SOURCE_FILES && strcmp(playing_filepath, item_path) == 0);
 
         if (idx == selected_file_idx) attron(A_REVERSE | COLOR_PAIR(1));
         else if (is_playing) attron(A_BOLD | COLOR_PAIR(4));
