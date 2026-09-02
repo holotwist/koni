@@ -17,4 +17,10 @@ extern KoniConfig app_config;
 void config_init(void);
 void config_save(void);
 
+bool config_is_music_dir(const char *path);
+bool config_find_parent_music_dir(const char *path, char *out_parent, size_t out_sz);
+bool config_find_child_music_dir(const char *path, char *out_child, size_t out_sz);
+void config_add_music_dir(const char *path);
+void config_remove_music_dir(const char *path);
+
 #endif // KONI_CONFIG_H

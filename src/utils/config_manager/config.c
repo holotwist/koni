@@ -185,6 +185,147 @@ static void upsert_ini_key(const char* filepath, const char* key, const char* va
     if (lines) free(lines);
 }
 
+static void normalize_path(const char *in, char *out, size_t out_sz) {
+    strncpy(out, in, out_sz - 1);
+    out[out_sz - 1] = '\0';
+    size_t len = strlen(out);
+    while (len > 1 && out[len - 1] == '/') {
+        out[len - 1] = '\0';
+        len--;
+    }
+}
+
+bool config_is_music_dir(const char *path) {
+    if (!path || !path[0]) return false;
+    char norm_target[1024];
+    normalize_path(path, norm_target, sizeof(norm_target));
+
+    char dirs_copy[2048];
+    strncpy(dirs_copy, app_config.music_directories, sizeof(dirs_copy) - 1);
+    dirs_copy[sizeof(dirs_copy) - 1] = '\0';
+
+    char *tok = strtok(dirs_copy, ",;");
+    while (tok) {
+        while (*tok == ' ' || *tok == '\t') tok++;
+        char norm_entry[1024];
+        normalize_path(tok, norm_entry, sizeof(norm_entry));
+        if (strcmp(norm_target, norm_entry) == 0) return true;
+        tok = strtok(NULL, ",;");
+    }
+    return false;
+}
+
+bool config_find_parent_music_dir(const char *path, char *out_parent, size_t out_sz) {
+    if (!path || !path[0]) return false;
+    char norm_target[1024];
+    normalize_path(path, norm_target, sizeof(norm_target));
+
+    char dirs_copy[2048];
+    strncpy(dirs_copy, app_config.music_directories, sizeof(dirs_copy) - 1);
+    dirs_copy[sizeof(dirs_copy) - 1] = '\0';
+
+    char *tok = strtok(dirs_copy, ",;");
+    while (tok) {
+        while (*tok == ' ' || *tok == '\t') tok++;
+        char norm_entry[1024];
+        normalize_path(tok, norm_entry, sizeof(norm_entry));
+
+        size_t entry_len = strlen(norm_entry);
+        if (strncmp(norm_target, norm_entry, entry_len) == 0 && norm_target[entry_len] == '/') {
+            if (out_parent) strncpy(out_parent, norm_entry, out_sz - 1);
+            return true;
+        }
+        tok = strtok(NULL, ",;");
+    }
+    return false;
+}
+
+bool config_find_child_music_dir(const char *path, char *out_child, size_t out_sz) {
+    if (!path || !path[0]) return false;
+    char norm_target[1024];
+    normalize_path(path, norm_target, sizeof(norm_target));
+    size_t target_len = strlen(norm_target);
+
+    char dirs_copy[2048];
+    strncpy(dirs_copy, app_config.music_directories, sizeof(dirs_copy) - 1);
+    dirs_copy[sizeof(dirs_copy) - 1] = '\0';
+
+    char *tok = strtok(dirs_copy, ",;");
+    while (tok) {
+        while (*tok == ' ' || *tok == '\t') tok++;
+        char norm_entry[1024];
+        normalize_path(tok, norm_entry, sizeof(norm_entry));
+
+        if (strncmp(norm_entry, norm_target, target_len) == 0 && norm_entry[target_len] == '/') {
+            if (out_child) strncpy(out_child, norm_entry, out_sz - 1);
+            return true;
+        }
+        tok = strtok(NULL, ",;");
+    }
+    return false;
+}
+
+void config_add_music_dir(const char *path) {
+    if (!path || !path[0]) return;
+    char norm_target[1024];
+    normalize_path(path, norm_target, sizeof(norm_target));
+
+    // Remove any redundant child directories before adding the parent
+    char new_dirs[2048] = "";
+    char dirs_copy[2048];
+    strncpy(dirs_copy, app_config.music_directories, sizeof(dirs_copy) - 1);
+    dirs_copy[sizeof(dirs_copy) - 1] = '\0';
+
+    size_t target_len = strlen(norm_target);
+    char *tok = strtok(dirs_copy, ",;");
+    while (tok) {
+        while (*tok == ' ' || *tok == '\t') tok++;
+        char norm_entry[1024];
+        normalize_path(tok, norm_entry, sizeof(norm_entry));
+
+        // Skip existing identical or child subdirectories
+        if (strcmp(norm_entry, norm_target) != 0 &&
+            !(strncmp(norm_entry, norm_target, target_len) == 0 && norm_entry[target_len] == '/')) {
+            if (new_dirs[0] != '\0') strncat(new_dirs, ",", sizeof(new_dirs) - strlen(new_dirs) - 1);
+            strncat(new_dirs, norm_entry, sizeof(new_dirs) - strlen(new_dirs) - 1);
+        }
+        tok = strtok(NULL, ",;");
+    }
+
+    if (new_dirs[0] != '\0') strncat(new_dirs, ",", sizeof(new_dirs) - strlen(new_dirs) - 1);
+    strncat(new_dirs, norm_target, sizeof(new_dirs) - strlen(new_dirs) - 1);
+
+    strncpy(app_config.music_directories, new_dirs, sizeof(app_config.music_directories) - 1);
+    config_save();
+}
+
+void config_remove_music_dir(const char *path) {
+    if (!path || !path[0]) return;
+    char norm_target[1024];
+    normalize_path(path, norm_target, sizeof(norm_target));
+
+    char new_dirs[2048] = "";
+    char dirs_copy[2048];
+    strncpy(dirs_copy, app_config.music_directories, sizeof(dirs_copy) - 1);
+    dirs_copy[sizeof(dirs_copy) - 1] = '\0';
+
+    char *tok = strtok(dirs_copy, ",;");
+    while (tok) {
+        while (*tok == ' ' || *tok == '\t') tok++;
+        char norm_entry[1024];
+        normalize_path(tok, norm_entry, sizeof(norm_entry));
+
+        if (strcmp(norm_entry, norm_target) != 0) {
+            if (new_dirs[0] != '\0') strncat(new_dirs, ",", sizeof(new_dirs) - strlen(new_dirs) - 1);
+            strncat(new_dirs, norm_entry, sizeof(new_dirs) - strlen(new_dirs) - 1);
+        }
+        tok = strtok(NULL, ",;");
+    }
+
+    strncpy(app_config.music_directories, new_dirs, sizeof(app_config.music_directories) - 1);
+    config_save();
+}
+
 void config_save(void) {
     const char *home = getenv("HOME");
     if (!home) return;
@@ -192,6 +333,8 @@ void config_save(void) {
     char filepath[1024];
     snprintf(filepath, sizeof(filepath), "%s/.config/koni/config.ini", home);
     
+    upsert_ini_key(filepath, "music_directories", app_config.music_directories);
+
     if (app_config.online_lyrics_asked) {
         upsert_ini_key(filepath, "lyrics.online", app_config.online_lyrics ? "true" : "false");
     }
