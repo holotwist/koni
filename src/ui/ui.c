@@ -98,6 +98,7 @@ static const HelpItem help_items[] = {
     {"n/b", "Next/Prev"},
     {"a/A", "Add/All"},
     {"u", "Rescan"},
+    {"o", "Sort Music"},
     {"s", "Shuffle"},
     {"r", "Repeat"},
     {"g", "RGain"},
