@@ -73,7 +73,11 @@ static void* scanner_worker(void *arg) {
         while (end > token && (*end == ' ' || *end == '\t')) *end-- = '\0';
 
         if (token[0] != '\0') {
-            scan_directory_recursive(token);
+            char parent_dir[1024];
+            // If a superior folder is already configured, skip scanning this subfolder directly
+            if (!config_find_parent_music_dir(token, parent_dir, sizeof(parent_dir))) {
+                scan_directory_recursive(token);
+            }
         }
         token = strtok(NULL, ",;");
     }
