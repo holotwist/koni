@@ -81,6 +81,10 @@ int main(int argc, char **argv) {
         for (int i = 0; i < num_playlist_files; i++) koni_metadata_free(&playlist[i].meta);
         free(playlist);
     }
+    if (active_folder.file_names) {
+        for (int i = 0; i < active_folder.count; i++) free(active_folder.file_names[i]);
+        free(active_folder.file_names);
+    }
     
     curl_global_cleanup();
     
