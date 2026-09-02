@@ -6,6 +6,7 @@
 #include "state.h"
 #include "codec.h"
 #include "lyrics.h"
+#include "ui_search.h"
 
 extern unsigned long ui_frame_counter;
 extern bool vis_needs_full_redraw;

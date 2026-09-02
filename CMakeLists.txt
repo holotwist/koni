@@ -70,6 +70,7 @@ add_executable(koni
     src/codecs/ma_codec/metadata.c
     src/ui/ui_common.c
     src/ui/ui_animations.c
+    src/ui/widgets/ui_search.c
     src/database/db.c
     src/database/library_scanner.c
     src/ui/ui_files.c

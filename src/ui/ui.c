@@ -91,6 +91,7 @@ typedef struct {
 } HelpItem;
 
 static const HelpItem help_items[] = {
+    {"/", "Search"},
     {"h", "Hide"},
     {"Tab", "Tabs"},
     {"space", "Pause"},

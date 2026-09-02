@@ -14,6 +14,10 @@
 #include <stdlib.h>
 
 bool ui_handle_input(int ch) {
+    if (ui_search_handle_input(ch, current_browser_tab)) {
+        return true;
+    }
+
     // Handle active confirmation dialog for folder selection
     if (folder_dialog.active) {
         if (ch == 'y' || ch == 'Y') {
@@ -71,6 +75,10 @@ bool ui_handle_input(int ch) {
             atomic_store(&current_cmd_atomic, CMD_QUIT);
             return false;
             
+        case '/':
+            ui_search_open();
+            break;
+
         case 'h': case 'H':
             show_help_bar = !show_help_bar;
             break;

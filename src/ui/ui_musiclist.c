@@ -13,34 +13,47 @@ void draw_musiclist_panel(int y, int x, int h, int w) {
         attroff(A_DIM | COLOR_PAIR(2));
     }
 
+    int start_y = y + 1;
     int list_h = h - 2;
-    if (list_h > 0) {
-        if (selected_library_idx < library_scroll_offset) {
-            library_scroll_offset = selected_library_idx;
-        } else if (selected_library_idx >= library_scroll_offset + list_h) {
-            library_scroll_offset = selected_library_idx - list_h + 1;
-        }
+
+    int search_offset = ui_search_render_bar(start_y, x, w);
+    start_y += search_offset;
+    list_h -= search_offset;
+
+    static int filtered_map[65536];
+    int total_visible = ui_search_get_filtered_indices(TAB_MUSIC, filtered_map, 65536);
+
+    int *cur_sel = ui_search_is_active() ? ui_search_get_selected_ptr() : &selected_library_idx;
+    int *cur_scroll = ui_search_is_active() ? ui_search_get_scroll_ptr() : &library_scroll_offset;
+
+    if (list_h > 0 && total_visible > 0) {
+        if (*cur_sel >= total_visible) *cur_sel = total_visible - 1;
+        if (*cur_sel < *cur_scroll) *cur_scroll = *cur_sel;
+        else if (*cur_sel >= *cur_scroll + list_h) *cur_scroll = *cur_sel - list_h + 1;
     }
 
-    for (int i = 0; i < list_h; i++) mvhline(y + i + 1, x + 1, ' ', w - 2);
+    for (int i = 0; i < list_h; i++) mvhline(start_y + i, x + 1, ' ', w - 2);
 
     int max_disp_len = w - 4;
     if (max_disp_len < 1) max_disp_len = 1;
 
-    if (num_library_tracks == 0) {
-        if (library_scanner_is_running()) {
-            mvprintw(y + 2, x + 3, "Scanning music library...");
+    if (total_visible == 0) {
+        if (ui_search_is_active() && ui_search_get_query()[0]) {
+            mvprintw(start_y + 1, x + 3, "No matching tracks found.");
+        } else if (library_scanner_is_running()) {
+            mvprintw(start_y + 1, x + 3, "Scanning music library...");
         } else {
-            mvprintw(y + 2, x + 3, "No tracks in library. Press 'u' to scan.");
+            mvprintw(start_y + 1, x + 3, "No tracks in library. Press 'u' to scan.");
         }
         return;
     }
 
-    for (int i = 0; i < list_h && i + library_scroll_offset < num_library_tracks; i++) {
-        int idx = i + library_scroll_offset;
+    for (int i = 0; i < list_h && i + *cur_scroll < total_visible; i++) {
+        int list_pos = i + *cur_scroll;
+        int idx = filtered_map[list_pos];
         bool is_playing = (current_play_source == SOURCE_LIBRARY && playing_file_idx == idx);
 
-        if (idx == selected_library_idx) attron(A_REVERSE | COLOR_PAIR(1));
+        if (list_pos == *cur_sel) attron(A_REVERSE | COLOR_PAIR(1));
         else if (is_playing) attron(A_BOLD | COLOR_PAIR(4));
         else attron(COLOR_PAIR(2));
 
@@ -59,17 +72,17 @@ void draw_musiclist_panel(int y, int x, int h, int w) {
         char disp_buf[1024] = {0};
         int text_w = utf8_display_width(formatted_name);
 
-        if (idx == selected_library_idx) {
+        if (list_pos == *cur_sel) {
             get_marquee_text(formatted_name, text_w, max_disp_len, ui_frame_counter, disp_buf, sizeof(disp_buf));
         } else {
             get_marquee_text(formatted_name, text_w, max_disp_len, 0, disp_buf, sizeof(disp_buf));
         }
 
         int chars_copied = (text_w <= max_disp_len) ? text_w : max_disp_len;
-        mvprintw(y + i + 1, x + 2, "%s", disp_buf);
+        mvprintw(start_y + i, x + 2, "%s", disp_buf);
         for (int p = chars_copied; p < max_disp_len; p++) printw(" ");
 
-        if (idx == selected_library_idx) attroff(A_REVERSE | COLOR_PAIR(1));
+        if (list_pos == *cur_sel) attroff(A_REVERSE | COLOR_PAIR(1));
         else if (is_playing) attroff(A_BOLD | COLOR_PAIR(4));
         else attroff(COLOR_PAIR(2));
     }
