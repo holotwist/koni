@@ -215,6 +215,80 @@ void save_state(void) {
     save_playlist_queue();
 }
 
+bool player_peek_next_track(char *out_path, size_t path_sz, char *out_name, size_t name_sz, int *out_idx) {
+    bool found = false;
+    int repeat_mode = atomic_load(&play_mode_repeat);
+    bool shuffle = atomic_load(&play_mode_shuffle);
+
+    pthread_mutex_lock(&state_mutex);
+
+    if (num_playlist_files > 0) {
+        if (current_play_source == SOURCE_QUEUE) {
+            if (repeat_mode == REPEAT_ONE) {
+                if (out_path) strncpy(out_path, playlist[0].path, path_sz - 1);
+                if (out_name) strncpy(out_name, playlist[0].name, name_sz - 1);
+                if (out_idx) *out_idx = 0;
+                found = true;
+            } else if (num_playlist_files > 1) {
+                if (out_path) strncpy(out_path, playlist[1].path, path_sz - 1);
+                if (out_name) strncpy(out_name, playlist[1].name, name_sz - 1);
+                if (out_idx) *out_idx = 1;
+                found = true;
+            }
+        } else {
+            if (out_path) strncpy(out_path, playlist[0].path, path_sz - 1);
+            if (out_name) strncpy(out_name, playlist[0].name, name_sz - 1);
+            if (out_idx) *out_idx = 0;
+            found = true;
+        }
+    }
+
+    if (!found) {
+        PlaybackSource src = (current_play_source == SOURCE_QUEUE) ? base_play_source : current_play_source;
+        int current_idx = (current_play_source == SOURCE_QUEUE) ? base_playing_idx : playing_file_idx;
+        int total_items = 0;
+        if (src == SOURCE_LIBRARY) total_items = num_library_tracks;
+        else if (src == SOURCE_FILES) total_items = active_folder.count;
+        else if (src == SOURCE_QUEUE) total_items = num_playlist_files;
+
+        if (total_items > 0) {
+            int next_idx = -1;
+            if (repeat_mode == REPEAT_ONE) {
+                next_idx = current_idx;
+            } else if (shuffle) {
+                next_idx = rand() % total_items;
+            } else {
+                next_idx = current_idx + 1;
+                if (next_idx >= total_items) {
+                    if (repeat_mode == REPEAT_ALL) next_idx = 0;
+                    else next_idx = -1;
+                }
+            }
+
+            if (next_idx >= 0 && next_idx < total_items) {
+                if (src == SOURCE_LIBRARY) {
+                    if (out_path) strncpy(out_path, library_tracks[next_idx].path, path_sz - 1);
+                    if (out_name) strncpy(out_name, library_tracks[next_idx].name, name_sz - 1);
+                } else if (src == SOURCE_FILES) {
+                    if (out_path) snprintf(out_path, path_sz, "%s/%s", active_folder.dir, active_folder.file_names[next_idx]);
+                    if (out_name) strncpy(out_name, active_folder.file_names[next_idx], name_sz - 1);
+                } else if (src == SOURCE_QUEUE) {
+                    if (out_path) strncpy(out_path, playlist[next_idx].path, path_sz - 1);
+                    if (out_name) strncpy(out_name, playlist[next_idx].name, name_sz - 1);
+                }
+                if (out_idx) *out_idx = next_idx;
+                found = true;
+            }
+        }
+    }
+
+    if (out_path && path_sz > 0) out_path[path_sz - 1] = '\0';
+    if (out_name && name_sz > 0) out_name[name_sz - 1] = '\0';
+
+    pthread_mutex_unlock(&state_mutex);
+    return found;
+}
+
 bool player_advance_track(PlayerCommand cmd) {
     if (cmd != CMD_NEXT && cmd != CMD_NEXT_AUTO && cmd != CMD_PREV) return false;
     

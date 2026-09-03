@@ -156,5 +156,6 @@ extern atomic_uint vis_srate;
 extern atomic_uint p_frames_consumed;
 
 bool player_advance_track(PlayerCommand cmd);
+bool player_peek_next_track(char *out_path, size_t path_sz, char *out_name, size_t name_sz, int *out_idx);
 
 #endif // PLAYER_STATE_H
