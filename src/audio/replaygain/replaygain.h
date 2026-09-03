@@ -18,8 +18,8 @@ typedef struct {
     // Automatic Gain Control (AGC)
     float current_multiplier;
     float target_multiplier;
-    float energy_history[4096];
-    int history_idx;
+    float avg_energy;
+    float energy_alpha;
     uint32_t sample_rate;
     uint32_t channels;
 } RGainState;

@@ -224,11 +224,24 @@ void *audio_thread_func(void *arg) {
             rgain_process(&rgain_state, interleaved, mix_samples);
             
             int current_vol = atomic_load(&volume);
-            for (uint32_t s = 0; s < mix_samples * fmt.num_channels; s++) {
-                long long val64 = ((long long)interleaved[s] * current_vol) / 100;
-                if (val64 > 2147483647LL) val64 = 2147483647LL;
-                else if (val64 < -2147483648LL) val64 = -2147483648LL;
-                interleaved[s] = (int32_t)val64;
+            float vol_factor = 0.0f;
+            if (current_vol <= 0) {
+                vol_factor = 0.0f;
+            } else if (current_vol <= 100) {
+                float norm = (float)current_vol / 100.0f;
+                vol_factor = norm * norm * norm; // Cubic perceptual loudness curve
+            } else {
+                float boost = (float)(current_vol - 100) / 100.0f;
+                vol_factor = 1.0f + boost; // Linear boost from 1.0x up to 2.0x (+6dB)
+            }
+
+            if (vol_factor != 1.0f) {
+                for (uint32_t s = 0; s < mix_samples * fmt.num_channels; s++) {
+                    long long val64 = (long long)((float)interleaved[s] * vol_factor);
+                    if (val64 > 2147483647LL) val64 = 2147483647LL;
+                    else if (val64 < -2147483648LL) val64 = -2147483648LL;
+                    interleaved[s] = (int32_t)val64;
+                }
             }
             
             uint32_t local_wpos = atomic_load(&vis_wpos);
