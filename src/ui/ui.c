@@ -64,7 +64,8 @@ static void ui_update_state(void) {
                                     
             if (!pending_questions) {
                 lyrics_engine_fetch_async(ui_cache.meta.title, ui_cache.meta.artist, ui_cache.meta.album,
-                                          atomic_load(&p_total_sec), ui_cache.filepath, ui_cache.meta.lyrics);
+                                          atomic_load(&p_total_sec), ui_cache.filepath, ui_cache.meta.lyrics,
+                                          atomic_load(&current_track_id));
             }
             
             ui_cache.fmt = p_format;

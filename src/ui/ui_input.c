@@ -44,7 +44,8 @@ bool ui_handle_input(int ch) {
                 app_config.online_lyrics_asked = true;
                 config_save();
                 lyrics_engine_fetch_async(ui_cache.meta.title, ui_cache.meta.artist, ui_cache.meta.album,
-                                          atomic_load(&p_total_sec), ui_cache.filepath, ui_cache.meta.lyrics);
+                                          atomic_load(&p_total_sec), ui_cache.filepath, ui_cache.meta.lyrics,
+                                          atomic_load(&current_track_id));
                 return true;
             } else if (ch != '1' && ch != 'q' && ch != 'Q') {
                 return true; // Block other interactions until answered
@@ -55,14 +56,16 @@ bool ui_handle_input(int ch) {
                 app_config.download_online_lyrics_asked = true;
                 config_save();
                 lyrics_engine_fetch_async(ui_cache.meta.title, ui_cache.meta.artist, ui_cache.meta.album,
-                                          atomic_load(&p_total_sec), ui_cache.filepath, ui_cache.meta.lyrics);
+                                          atomic_load(&p_total_sec), ui_cache.filepath, ui_cache.meta.lyrics,
+                                          atomic_load(&current_track_id));
                 return true;
             } else if (ch == 'n' || ch == 'N') {
                 app_config.download_online_lyrics = false;
                 app_config.download_online_lyrics_asked = true;
                 config_save();
                 lyrics_engine_fetch_async(ui_cache.meta.title, ui_cache.meta.artist, ui_cache.meta.album,
-                                          atomic_load(&p_total_sec), ui_cache.filepath, ui_cache.meta.lyrics);
+                                          atomic_load(&p_total_sec), ui_cache.filepath, ui_cache.meta.lyrics,
+                                          atomic_load(&current_track_id));
                 return true;
             } else if (ch != '1' && ch != 'q' && ch != 'Q') {
                 return true; // Block other interactions until answered

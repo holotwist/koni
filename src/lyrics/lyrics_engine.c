@@ -98,8 +98,21 @@ static void save_lyrics_cache(const LyricFetchQuery *query, const char *raw_data
     }
 }
 
-static void apply_document_to_ui(LyricDocument *doc, const char *backend_label) {
+static void free_lyric_query(LyricFetchQuery *query) {
+    if (!query) return;
+    if (query->embedded_text) free(query->embedded_text);
+    free(query);
+}
+
+static void apply_document_to_ui(LyricDocument *doc, const char *backend_label, int track_id) {
     pthread_mutex_lock(&state_mutex);
+    // Ignore results if the user has already switched to another track
+    if (track_id != atomic_load(&current_track_id)) {
+        if (doc) lyric_document_free(doc);
+        pthread_mutex_unlock(&state_mutex);
+        return;
+    }
+
     if (ui_cache.lrc_doc) lyric_document_free(ui_cache.lrc_doc);
     ui_cache.lrc_doc = doc;
     strncpy(current_lyrics_backend, backend_label, sizeof(current_lyrics_backend) - 1);
@@ -116,8 +129,8 @@ static void* lyrics_engine_worker(void *arg) {
         for (int i = 0; plugins[i]; i++) {
             LyricDocument *doc = plugins[i]->parse(query->embedded_text, strlen(query->embedded_text));
             if (doc) {
-                apply_document_to_ui(doc, "Embedded");
-                free(query);
+                apply_document_to_ui(doc, "Embedded", query->track_id);
+                free_lyric_query(query);
                 return NULL;
             }
         }
@@ -147,7 +160,7 @@ static void* lyrics_engine_worker(void *arg) {
             char *data = try_read_file(path);
 
             // Custom config path
-            if (!data && app_config.lyrics_custom_path[0]) {
+            if (!data && app_config.lyrics_custom_path && app_config.lyrics_custom_path[0]) {
                 snprintf(path, sizeof(path), "%s/%s%s", app_config.lyrics_custom_path, safe_name, exts[e]);
                 data = try_read_file(path);
             }
@@ -167,8 +180,8 @@ static void* lyrics_engine_worker(void *arg) {
                 if (doc) {
                     char label[32];
                     snprintf(label, sizeof(label), "Local (%s)", plugins[i]->name);
-                    apply_document_to_ui(doc, label);
-                    free(query);
+                    apply_document_to_ui(doc, label, query->track_id);
+                    free_lyric_query(query);
                     return NULL;
                 }
             }
@@ -189,8 +202,8 @@ static void* lyrics_engine_worker(void *arg) {
                     LyricDocument *doc = plugins[i]->parse(raw_data, strlen(raw_data));
                     free(raw_data);
                     if (doc) {
-                        apply_document_to_ui(doc, method_label);
-                        free(query);
+                        apply_document_to_ui(doc, method_label, query->track_id);
+                        free_lyric_query(query);
                         return NULL;
                     }
                 }
@@ -198,8 +211,8 @@ static void* lyrics_engine_worker(void *arg) {
         }
     }
 
-    apply_document_to_ui(NULL, "Not Found");
-    free(query);
+    apply_document_to_ui(NULL, "Not Found", query->track_id);
+    free_lyric_query(query);
     return NULL;
 }
 
@@ -207,7 +220,7 @@ void lyrics_engine_init(void) {
     // Setup if needed
 }
 
-void lyrics_engine_fetch_async(const char *title, const char *artist, const char *album, uint32_t duration, const char *filepath, const char *embedded_text) {
+void lyrics_engine_fetch_async(const char *title, const char *artist, const char *album, uint32_t duration, const char *filepath, const char *embedded_text, int track_id) {
     if (!filepath) return;
 
     LyricFetchQuery *query = calloc(1, sizeof(LyricFetchQuery));
@@ -216,7 +229,8 @@ void lyrics_engine_fetch_async(const char *title, const char *artist, const char
     if (artist) strncpy(query->artist, artist, sizeof(query->artist) - 1);
     if (album) strncpy(query->album, album, sizeof(query->album) - 1);
     query->duration_sec = duration;
-    query->embedded_text = embedded_text;
+    query->embedded_text = embedded_text ? strdup(embedded_text) : NULL;
+    query->track_id = track_id;
 
     if (query->title[0] == '\0' && query->artist[0] == '\0') {
         const char *slash = strrchr(filepath, '/');
