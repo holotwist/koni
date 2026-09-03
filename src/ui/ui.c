@@ -278,6 +278,7 @@ static void ui_loop(void) {
 void ui_run(bool force_colors) {
     // timeout(25) sets refresh interval to 25ms, 40FPS
     initscr(); cbreak(); noecho(); keypad(stdscr, TRUE); curs_set(0); timeout(25);
+    set_escdelay(25); // Eliminates delay when pressing standalone ESC
     start_color(); use_default_colors();
     
     if (force_colors && COLORS >= 256) {
