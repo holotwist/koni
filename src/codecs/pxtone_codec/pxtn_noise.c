@@ -11,6 +11,7 @@ typedef struct {
     const int16_t *p_smp;
     bool b_rev;
     bool is_rand;
+    bool is_rect_rand;
     int rdm_start;
     int rdm_margin;
     int rdm_idx;
@@ -18,6 +19,7 @@ typedef struct {
 
 static void setup_osc(PxOscState *st, const PxOsc *osc, uint32_t target_sps) {
     st->is_rand = (osc->type == 4 || osc->type == 8);
+    st->is_rect_rand = (osc->type == 8);
     st->inc = (44100.0 / (double)target_sps) * (osc->freq / 100.0);
     st->offset = st->is_rand ? 0.0 : (double)NOISE_TABLE_SIZE * (osc->offset * 0.01);
     st->volume = osc->vol * 0.01;
@@ -26,8 +28,8 @@ static void setup_osc(PxOscState *st, const PxOsc *osc, uint32_t target_sps) {
 
     const int16_t *rtbl = pxtn_noise_get_rand_table();
     st->rdm_idx = (int)(44100.0 * (osc->offset * 0.01)) % 44100;
-    st->rdm_start = rtbl[st->rdm_idx];
-    st->rdm_margin = rtbl[(st->rdm_idx + 1) % 44100] - st->rdm_start;
+    st->rdm_start = 0;
+    st->rdm_margin = rtbl[st->rdm_idx];
 }
 
 static void advance_osc(PxOscState *st, double inc) {
@@ -70,15 +72,19 @@ void pxtn_synth_noise(PxVoiceUnit *vu, PxNoiseUnit *units, int unit_num, int smp
         double env_start = 0.0, env_margin = 0.0;
         int env_count = 0;
 
-        if (nu->env_num > 0) {
-            env_margin = (nu->enves[0].y * 0.01) - env_start;
+        while (env_idx < nu->env_num) {
+            env_margin = (nu->enves[env_idx].y * 0.01) - env_start;
+            if (nu->enves[env_idx].x > 0) break;
+            env_start = nu->enves[env_idx].y * 0.01;
+            env_idx++;
         }
 
         for (int s = 0; s < dst_len; s++) {
             // Main wave
             double work = 0.0;
             if (osc_main.is_rand) {
-                work = osc_main.rdm_start + osc_main.rdm_margin * osc_main.offset / (double)NOISE_TABLE_SIZE;
+                if (osc_main.is_rect_rand) work = osc_main.rdm_start;
+                else work = osc_main.rdm_start + osc_main.rdm_margin * osc_main.offset / (double)NOISE_TABLE_SIZE;
             } else {
                 int ofs = (int)osc_main.offset % NOISE_TABLE_SIZE;
                 work = osc_main.p_smp[ofs];

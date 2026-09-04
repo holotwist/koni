@@ -4,11 +4,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void reset_unit_tones(PxUnit *u, const PxVoice *v, float clock_rate) {
+void reset_unit_tones_export(PxtnTiny *p, PxUnit *u, const PxVoice *v, float clock_rate) {
     for (int i = 0; i < v->num_units; i++) {
         const PxVoiceUnit *vu = &v->units[i];
         float tun = (vu->tuning != 0.0f) ? vu->tuning : 1.0f;
-        float ofs_freq = pxtn_get_freq(0x4500 - vu->basic_key) * tun;
+        float ofs_freq;
+        if (vu->beat_fit && p->info.beat_tempo > 0.0f) {
+            ofs_freq = ((float)vu->smp_body_w * p->info.beat_tempo) / (44100.0f * 60.0f * tun);
+        } else {
+            ofs_freq = pxtn_get_freq(0x4500 - vu->basic_key) * tun;
+        }
 
         u->tones[i].smp_pos = 0.0;
         u->tones[i].offset_freq = ofs_freq;
@@ -42,19 +47,40 @@ static void process_event(PxtnTiny *p, const PxEvent *e) {
 
             if (u->voice_idx < 0 || u->voice_idx >= p->voice_count) break;
             const PxVoice *v = &p->voices[u->voice_idx];
+
             for (int vi = 0; vi < v->num_units; vi++) {
                 PxVoiceTone *vt = &u->tones[vi];
                 const PxVoiceUnit *vu = &v->units[vi];
-                vt->life_count = on_count + (vu->has_env ? vu->env_release : 0);
-                vt->on_count = on_count;
-                vt->smp_pos = 0.0;
-                vt->env_pos = 0;
-                if (vu->has_env) {
-                    vt->env_volume = 0;
-                    vt->env_start = 0;
+
+                if (vu->has_env && vu->env_release > 0) {
+                    int32_t max_life1 = on_count + vu->env_release;
+                    int32_t max_life2 = max_life1;
+
+                    // Look ahead for the next note on the same unit
+                    int32_t next_clock = e->clock + e->value + vt->env_release_clock;
+                    for (int n = p->cur_event_idx + 1; n < p->event_count; n++) {
+                        if (p->events[n].clock > next_clock) break;
+                        if (p->events[n].unit_no == e->unit_no && p->events[n].kind == PX_EVENT_ON) {
+                            max_life2 = (int32_t)((p->events[n].clock - e->clock) * p->clock_rate);
+                            break;
+                        }
+                    }
+                    vt->life_count = (max_life1 < max_life2) ? max_life1 : max_life2;
                 } else {
-                    vt->env_volume = 128;
-                    vt->env_start = 128;
+                    vt->life_count = on_count;
+                }
+
+                if (vt->life_count > 0) {
+                    vt->on_count = on_count;
+                    vt->smp_pos = 0.0;
+                    vt->env_pos = 0;
+                    if (vu->has_env) {
+                        vt->env_volume = 0;
+                        vt->env_start = 0;
+                    } else {
+                        vt->env_volume = 128;
+                        vt->env_start = 128;
+                    }
                 }
             }
             break;
@@ -95,7 +121,12 @@ static void process_event(PxtnTiny *p, const PxEvent *e) {
             int v_idx = e->value >= 0 ? e->value : (-e->value - 1);
             if (v_idx >= 0 && v_idx < p->voice_count) {
                 u->voice_idx = v_idx;
-                reset_unit_tones(u, &p->voices[u->voice_idx], p->clock_rate);
+                if (e->value >= 0) {
+                    u->key_now = 0x6000;
+                    u->key_start = 0x6000;
+                    u->key_margin = 0;
+                }
+                reset_unit_tones_export(p, u, &p->voices[u->voice_idx], p->clock_rate);
             }
             break;
         }
@@ -130,13 +161,15 @@ uint32_t pxtn_synth_render(PxtnTiny *p, int32_t *out_pcm, uint32_t max_frames) {
                 const PxVoiceUnit *vu = &v->units[vi];
                 PxVoiceTone *vt = &p->units[u].tones[vi];
                 if (vt->life_count > 0) {
-                    if (vu->has_env && vu->p_env) {
+                    if (vu->has_env) {
                         if (vt->on_count > 0) {
-                            if (vt->env_pos < vu->env_size) {
+                            if (vu->p_env && vt->env_pos < vu->env_size) {
                                 vt->env_volume = vu->p_env[vt->env_pos++];
                             }
                         } else if (vu->env_release > 0) {
-                            vt->env_volume = vt->env_start - (vt->env_start * vt->env_pos / vu->env_release);
+                            int32_t ev = vt->env_start - (vt->env_start * vt->env_pos / vu->env_release);
+                            if (ev < 0) ev = 0;
+                            vt->env_volume = ev;
                             vt->env_pos++;
                         } else {
                             vt->life_count = 0;
@@ -295,16 +328,21 @@ bool pxtn_synth_seek(PxtnTiny *p, uint64_t target_sample) {
     p->time_pan_idx = 0;
 
     for (int u = 0; u < p->unit_count; u++) {
+        p->units[u].velocity = 104;
+        p->units[u].volume = 104;
+        p->units[u].tuning = 1.0f;
         p->units[u].key_now = 0x6000;
         p->units[u].key_start = 0x6000;
         p->units[u].key_margin = 0;
         p->units[u].portamento_pos = 0;
+        p->units[u].pan_vols[0] = 64;
+        p->units[u].pan_vols[1] = 64;
         memset(p->units[u].pan_time_bufs, 0, sizeof(p->units[u].pan_time_bufs));
-        for (int vi = 0; vi < 2; vi++) {
-            p->units[u].tones[vi].life_count = 0;
-            p->units[u].tones[vi].on_count = 0;
-            p->units[u].tones[vi].smp_pos = 0.0;
-            p->units[u].tones[vi].env_pos = 0;
+
+        int v_idx = (u < p->voice_count) ? u : 0;
+        p->units[u].voice_idx = v_idx;
+        if (v_idx < p->voice_count) {
+            reset_unit_tones_export(p, &p->units[u], &p->voices[v_idx], p->clock_rate);
         }
     }
 

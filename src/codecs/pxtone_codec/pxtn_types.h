@@ -58,6 +58,7 @@ typedef struct {
     bool has_env;
     bool loop;
     bool smooth;
+    bool beat_fit;
     float tuning;
     int32_t basic_key;
 } PxVoiceUnit;
@@ -97,6 +98,8 @@ typedef struct {
 
 typedef struct {
     int group;
+    int unit;
+    float freq;
     int smp_num;
     int offset;
     int rate_pct;

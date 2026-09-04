@@ -131,8 +131,9 @@ static void synth_ptv_wave(PxVoiceUnit *vu, int wave_type, PxPoint *pts, int pt_
             int i = (reso > 0) ? (reso * s / vu->smp_body_w) : 0;
             int c = 0;
             while (c < pt_num && pts[c].x <= i) c++;
+
             int x1, y1, x2, y2;
-            if (c == pt_num) {
+            if (c >= pt_num) {
                 x1 = pt_num > 0 ? pts[pt_num - 1].x : 0;
                 y1 = pt_num > 0 ? pts[pt_num - 1].y : 0;
                 x2 = reso;
@@ -163,44 +164,53 @@ static void synth_ptv_wave(PxVoiceUnit *vu, int wave_type, PxPoint *pts, int pt_
 }
 
 static void build_envelope(PxVoiceUnit *vu, PxPoint *pts, int head_num, int tail_num, int fps, uint32_t sps) {
-    if (head_num <= 0 || fps <= 0) return;
-    int size = 0;
-    for (int i = 0; i < head_num; i++) size += pts[i].x;
-    vu->env_size = (int32_t)((double)size * sps / fps);
-    if (vu->env_size <= 0) vu->env_size = 1;
-    vu->p_env = calloc(vu->env_size, 1);
-    if (!vu->p_env) return;
+    if (fps <= 0) return;
 
-    PxPoint *conv = malloc(sizeof(PxPoint) * head_num);
-    if (!conv) { free(vu->p_env); vu->p_env = NULL; return; }
+    if (head_num > 0) {
+        int size = 0;
+        for (int i = 0; i < head_num; i++) size += pts[i].x;
+        vu->env_size = (int32_t)((double)size * sps / fps);
+        if (vu->env_size <= 0) vu->env_size = 1;
+        vu->p_env = calloc(vu->env_size, 1);
+        if (!vu->p_env) return;
 
-    int offset = 0;
-    for (int i = 0; i < head_num; i++) {
-        offset += (int32_t)((double)pts[i].x * sps / fps);
-        conv[i].x = offset;
-        conv[i].y = pts[i].y;
+        PxPoint *conv = malloc(sizeof(PxPoint) * head_num);
+        if (!conv) { free(vu->p_env); vu->p_env = NULL; return; }
+
+        int offset = 0;
+        int valid_head = 0;
+        for (int i = 0; i < head_num; i++) {
+            if (i == 0 || pts[i].x != 0 || pts[i].y != 0) {
+                offset += (int32_t)((double)pts[i].x * sps / fps);
+                conv[valid_head].x = offset;
+                conv[valid_head].y = pts[i].y;
+                valid_head++;
+            }
+        }
+
+        int e = 0;
+        int start_x = 0, start_y = 0;
+        for (int s = 0; s < vu->env_size; s++) {
+            while (e < valid_head && s >= conv[e].x) {
+                start_x = conv[e].x;
+                start_y = conv[e].y;
+                e++;
+            }
+            if (e < valid_head && conv[e].x > start_x) {
+                vu->p_env[s] = (uint8_t)(start_y + (conv[e].y - start_y) * (s - start_x) / (conv[e].x - start_x));
+            } else {
+                vu->p_env[s] = (uint8_t)start_y;
+            }
+        }
+        free(conv);
     }
 
-    int e = 0;
-    int start_x = 0, start_y = 0;
-    for (int s = 0; s < vu->env_size; s++) {
-        while (e < head_num && s >= conv[e].x) {
-            start_x = conv[e].x;
-            start_y = conv[e].y;
-            e++;
-        }
-        if (e < head_num && conv[e].x > start_x) {
-            vu->p_env[s] = (uint8_t)(start_y + (conv[e].y - start_y) * (s - start_x) / (conv[e].x - start_x));
-        } else {
-            vu->p_env[s] = (uint8_t)start_y;
-        }
-    }
-    free(conv);
-
-    if (tail_num > 0) {
+    if (tail_num > 0 && pts) {
         vu->env_release = (int32_t)((double)pts[head_num].x * sps / fps);
     }
-    vu->has_env = true;
+    if (head_num > 0 || tail_num > 0) {
+        vu->has_env = true;
+    }
 }
 
 PxtnTiny* pxtn_load_file(const char *filepath, uint32_t target_sps) {
@@ -390,6 +400,7 @@ PxtnTiny* pxtn_load_file(const char *filepath, uint32_t target_sps) {
                 v->units[0].tuning = tuning;
                 v->units[0].loop = (vflags & 0x01) != 0;
                 v->units[0].smooth = (vflags & 0x02) != 0;
+                v->units[0].beat_fit = (vflags & 0x04) != 0;
                 convert_pcm(&v->units[0], mr.data + mr.cur, ch, bps, sps, data_sz, target_sps);
             }
             mr_seek(&mr, start + sz, SEEK_SET);
@@ -474,6 +485,7 @@ PxtnTiny* pxtn_load_file(const char *filepath, uint32_t target_sps) {
                 v->units[0].tuning = tuning;
                 v->units[0].loop = (vflags & 0x01) != 0;
                 v->units[0].smooth = (vflags & 0x02) != 0;
+                v->units[0].beat_fit = (vflags & 0x04) != 0;
                 pxtn_synth_noise(&v->units[0], nu_list, valid_nu, smp_num_44k, target_sps);
             }
             mr_seek(&mr, start + sz, SEEK_SET);
@@ -496,6 +508,7 @@ PxtnTiny* pxtn_load_file(const char *filepath, uint32_t target_sps) {
                 v->units[0].tuning = tuning;
                 v->units[0].loop = (vflags & 0x01) != 0;
                 v->units[0].smooth = (vflags & 0x02) != 0;
+                v->units[0].beat_fit = (vflags & 0x04) != 0;
                 decode_ogg(mr.data + mr.cur, ogg_sz, &v->units[0], target_sps);
             }
             mr_seek(&mr, start + sz, SEEK_SET);
@@ -539,12 +552,15 @@ PxtnTiny* pxtn_load_file(const char *filepath, uint32_t target_sps) {
                     // PTV coordinate/overtone synth waves are pitched waveforms that loop
                     v->units[u].loop = ((vflags & 0x01) != 0) || (dflags & 0x01);
                     v->units[u].smooth = (vflags & 0x02) != 0;
+                    v->units[u].beat_fit = (vflags & 0x04) != 0;
 
                     if (dflags & 0x01) { // Wave
                         int32_t wtype = 0, num_pts = 0, reso = 0;
                         mr_read_var(&mr, &wtype);
                         mr_read_var(&mr, &num_pts);
-                        mr_read_var(&mr, &reso);
+                        if (wtype == 0) {
+                            mr_read_var(&mr, &reso);
+                        }
                         PxPoint pts[128];
                         int read_p = num_pts < 128 ? num_pts : 128;
                         for (int i = 0; i < read_p; i++) {
@@ -603,16 +619,10 @@ PxtnTiny* pxtn_load_file(const char *filepath, uint32_t target_sps) {
 
                 PxDelay *d = &p->delays[p->delay_count++];
                 d->group = group < MAX_GROUPS ? group : 0;
+                d->unit = unit;
+                d->freq = freq;
                 d->rate_pct = (int)rate;
-                if (freq > 0.0f) {
-                    if (unit == 0) d->smp_num = (int)(target_sps * 60.0f / p->info.beat_tempo / freq);
-                    else if (unit == 1) d->smp_num = (int)(target_sps * 60.0f * p->info.beat_num / p->info.beat_tempo / freq);
-                    else d->smp_num = (int)(target_sps / freq);
-                }
-                if (d->smp_num > 0) {
-                    d->bufs[0] = calloc(d->smp_num, sizeof(int32_t));
-                    d->bufs[1] = calloc(d->smp_num, sizeof(int32_t));
-                }
+                d->smp_num = 0;
             }
         } else if (memcmp(tag, "effeOVER", 8) == 0) {
             uint32_t sz = 0;
@@ -671,19 +681,39 @@ PxtnTiny* pxtn_load_file(const char *filepath, uint32_t target_sps) {
     }
     if (p->unit_count == 0) p->unit_count = 1;
 
+    p->clock_rate = (float)(60.0 * (double)target_sps / ((double)p->info.beat_tempo * (double)beat_clock));
+
+    // Allocate delays using resolved tempo
+    for (int d = 0; d < p->delay_count; d++) {
+        PxDelay *del = &p->delays[d];
+        if (del->freq > 0.0f) {
+            if (del->unit == 0) del->smp_num = (int)(target_sps * 60.0f / p->info.beat_tempo / del->freq);
+            else if (del->unit == 1) del->smp_num = (int)(target_sps * 60.0f * p->info.beat_num / p->info.beat_tempo / del->freq);
+            else del->smp_num = (int)(target_sps / del->freq);
+        }
+        if (del->smp_num > 0) {
+            del->bufs[0] = calloc(del->smp_num, sizeof(int32_t));
+            del->bufs[1] = calloc(del->smp_num, sizeof(int32_t));
+        }
+    }
+
     for (int u = 0; u < p->unit_count; u++) {
         p->units[u].velocity = 104;
         p->units[u].volume = 104;
         p->units[u].tuning = 1.0f;
         p->units[u].key_now = 0x6000;
         p->units[u].key_start = 0x6000;
+        p->units[u].key_margin = 0;
+        p->units[u].portamento_pos = 0;
         p->units[u].pan_vols[0] = 64;
         p->units[u].pan_vols[1] = 64;
         int v_idx = (u < p->voice_count) ? u : 0;
         p->units[u].voice_idx = v_idx;
+        if (v_idx < p->voice_count) {
+            extern void reset_unit_tones_export(PxtnTiny *p, PxUnit *u, const PxVoice *v, float clock_rate);
+            reset_unit_tones_export(p, &p->units[u], &p->voices[v_idx], p->clock_rate);
+        }
     }
-
-    p->clock_rate = (float)(60.0 * (double)target_sps / ((double)p->info.beat_tempo * (double)beat_clock));
     p->smp_stride = 44100.0f / (float)target_sps;
     p->smp_smooth = target_sps / 250;
 
