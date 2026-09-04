@@ -4,6 +4,7 @@
 #include "file_list.h"
 #include "state.h"
 #include "codec.h"
+#include "config.h"
 #include "db.h"
 #include "ui_common.h"
 #include <dirent.h>
@@ -77,7 +78,10 @@ static void* metadata_worker(void* arg) {
             if (codec && codec->read_metadata) {
                 codec->read_metadata(filepath, &meta, &duration);
                 if (stat(filepath, &st) == 0) {
-                    db_upsert_track(filepath, st.st_mtime, &meta, duration);
+                    // Only insert into the music library DB if within a configured music folder
+                    if (config_find_parent_music_dir(filepath, NULL)) {
+                        db_upsert_track(filepath, st.st_mtime, &meta, duration);
+                    }
                 }
             }
         }

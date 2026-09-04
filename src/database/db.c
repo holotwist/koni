@@ -2,6 +2,7 @@
 #define _XOPEN_SOURCE 600
 
 #include "db.h"
+#include "config.h"
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -217,11 +218,20 @@ void db_prune_missing_files(void) {
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             const char *path = (const char *)sqlite3_column_text(stmt, 0);
-            if (path && access(path, F_OK) != 0) {
-                // File no longer exists, remove from DB
-                sqlite3_reset(del_stmt);
-                sqlite3_bind_text(del_stmt, 1, path, -1, SQLITE_STATIC);
-                sqlite3_step(del_stmt);
+            if (path) {
+                bool should_remove = false;
+                if (access(path, F_OK) != 0) {
+                    should_remove = true;
+                } else if (!config_find_parent_music_dir(path, NULL)) {
+                    // File exists on disk but is not in any selected music folder
+                    should_remove = true;
+                }
+
+                if (should_remove) {
+                    sqlite3_reset(del_stmt);
+                    sqlite3_bind_text(del_stmt, 1, path, -1, SQLITE_STATIC);
+                    sqlite3_step(del_stmt);
+                }
             }
         }
         sqlite3_finalize(stmt);

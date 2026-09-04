@@ -101,11 +101,15 @@ static void process_event(PxtnTiny *p, const PxEvent *e) {
             break;
         case PX_EVENT_PAN_TIME:
             if (e->value >= 64) {
-                u->pan_times[0] = ((e->value - 64) * 44100) / p->dst_sps;
+                int val = e->value - 64;
+                if (val > 63) val = 63;
+                u->pan_times[0] = (val * 44100) / p->dst_sps;
                 u->pan_times[1] = 0;
             } else {
+                int val = 64 - e->value;
+                if (val > 63) val = 63;
                 u->pan_times[0] = 0;
-                u->pan_times[1] = ((64 - e->value) * 44100) / p->dst_sps;
+                u->pan_times[1] = (val * 44100) / p->dst_sps;
             }
             break;
         case PX_EVENT_VELOCITY:

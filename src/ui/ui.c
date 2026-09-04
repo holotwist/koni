@@ -24,13 +24,8 @@ static void ui_update_state(void) {
         memset(&ui_cache.fmt, 0, sizeof(ui_cache.fmt));
         ui_cache.filename[0] = '\0';
         
-        if (current_play_source == SOURCE_FILES && playing_file_idx >= 0 && playing_file_idx < num_files) {
-            selected_file_idx = playing_file_idx;
-        } else if (current_play_source == SOURCE_QUEUE && playing_file_idx >= 0 && playing_file_idx < num_playlist_files) {
-            selected_playlist_idx = playing_file_idx;
-        } else if (current_play_source == SOURCE_LIBRARY && playing_file_idx >= 0 && playing_file_idx < num_library_tracks) {
-            selected_library_idx = playing_file_idx;
-        }
+        // Do not force the selector cursor to the song. It stays where the user leaves it
+
         ui_cache.idx = playing_file_idx;
         strncpy(ui_cache.filepath, playing_filepath, sizeof(ui_cache.filepath) - 1);
         ui_cache.filepath[sizeof(ui_cache.filepath) - 1] = '\0';

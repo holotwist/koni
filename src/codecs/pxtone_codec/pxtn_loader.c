@@ -98,12 +98,32 @@ static void decode_ogg(const uint8_t *ogg_data, size_t size, PxVoiceUnit *vu, ui
 
     ma_uint64 total_frames = 0;
     ma_decoder_get_length_in_pcm_frames(&dec, &total_frames);
-    if (total_frames > 0) {
+    if (total_frames > 0 && total_frames < 44100 * 60 * 10) {
         vu->p_smp_w = malloc((size_t)total_frames * 4);
         if (vu->p_smp_w) {
             ma_uint64 read_frames = 0;
             ma_decoder_read_pcm_frames(&dec, vu->p_smp_w, total_frames, &read_frames);
             vu->smp_body_w = (int32_t)read_frames;
+        }
+    } else {
+        size_t cap = 16384;
+        size_t total_read = 0;
+        int16_t *buf = malloc(cap * 4);
+        if (buf) {
+            while (1) {
+                ma_uint64 frames_read = 0;
+                ma_result res = ma_decoder_read_pcm_frames(&dec, buf + (total_read * 2), cap - total_read, &frames_read);
+                total_read += (size_t)frames_read;
+                if (res != MA_SUCCESS || frames_read == 0) break;
+                if (total_read >= cap) {
+                    cap *= 2;
+                    int16_t *nb = realloc(buf, cap * 4);
+                    if (!nb) break;
+                    buf = nb;
+                }
+            }
+            vu->p_smp_w = buf;
+            vu->smp_body_w = (int32_t)total_read;
         }
     }
     ma_decoder_uninit(&dec);
@@ -500,8 +520,14 @@ PxtnTiny* pxtn_load_file(const char *filepath, uint32_t target_sps) {
             mr_read(&mr, &bkey, 2);
             mr_read(&mr, &vflags, 4);
             mr_read(&mr, &tuning, 4);
-            int32_t ogg_sz = sz - 16;
-            if (p->voice_count < MAX_VOICES && ogg_sz > 0) {
+
+            int32_t ogg_ch = 0, ogg_sps = 0, ogg_smp_num = 0, ogg_size = 0;
+            mr_read(&mr, &ogg_ch, 4);
+            mr_read(&mr, &ogg_sps, 4);
+            mr_read(&mr, &ogg_smp_num, 4);
+            mr_read(&mr, &ogg_size, 4);
+
+            if (p->voice_count < MAX_VOICES && ogg_size > 0 && mr.cur + ogg_size <= mr.size) {
                 PxVoice *v = &p->voices[p->voice_count++];
                 v->num_units = 1;
                 v->units[0].basic_key = bkey;
@@ -509,7 +535,7 @@ PxtnTiny* pxtn_load_file(const char *filepath, uint32_t target_sps) {
                 v->units[0].loop = (vflags & 0x01) != 0;
                 v->units[0].smooth = (vflags & 0x02) != 0;
                 v->units[0].beat_fit = (vflags & 0x04) != 0;
-                decode_ogg(mr.data + mr.cur, ogg_sz, &v->units[0], target_sps);
+                decode_ogg(mr.data + mr.cur, (size_t)ogg_size, &v->units[0], target_sps);
             }
             mr_seek(&mr, start + sz, SEEK_SET);
         } else if (memcmp(tag, "matePTV ", 8) == 0) {
@@ -549,8 +575,7 @@ PxtnTiny* pxtn_load_file(const char *filepath, uint32_t target_sps) {
 
                     v->units[u].basic_key = bkey;
                     memcpy(&v->units[u].tuning, &tun_bits, 4);
-                    // PTV coordinate/overtone synth waves are pitched waveforms that loop
-                    v->units[u].loop = ((vflags & 0x01) != 0) || (dflags & 0x01);
+                    v->units[u].loop = (vflags & 0x01) != 0;
                     v->units[u].smooth = (vflags & 0x02) != 0;
                     v->units[u].beat_fit = (vflags & 0x04) != 0;
 

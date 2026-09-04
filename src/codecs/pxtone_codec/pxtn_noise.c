@@ -95,7 +95,8 @@ void pxtn_synth_noise(PxVoiceUnit *vu, PxNoiseUnit *units, int unit_num, int smp
             // Volume modulation
             double vol = 0.0;
             if (osc_volu.is_rand) {
-                vol = osc_volu.rdm_start;
+                if (osc_volu.is_rect_rand) vol = osc_volu.rdm_start;
+                else vol = osc_volu.rdm_start + osc_volu.rdm_margin * (int)osc_volu.offset / NOISE_TABLE_SIZE;
             } else {
                 int ofs = (int)osc_volu.offset % NOISE_TABLE_SIZE;
                 vol = osc_volu.p_smp[ofs];
@@ -127,7 +128,8 @@ void pxtn_synth_noise(PxVoiceUnit *vu, PxNoiseUnit *units, int unit_num, int smp
             // Frequency modulation & step
             double fre = 0.0;
             if (osc_freq.is_rand) {
-                fre = osc_freq.rdm_start;
+                if (osc_freq.is_rect_rand) fre = osc_freq.rdm_start;
+                else fre = osc_freq.rdm_start + osc_freq.rdm_margin * (int)osc_freq.offset / NOISE_TABLE_SIZE;
             } else {
                 int ofs = (int)osc_freq.offset % NOISE_TABLE_SIZE;
                 fre = (double)0x3200 * osc_freq.p_smp[ofs] / 32767.0;
