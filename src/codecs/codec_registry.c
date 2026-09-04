@@ -6,9 +6,11 @@
 
 extern const KoniCodecImpl dana_codec_impl;
 extern const KoniCodecImpl ma_codec_impl;
+extern const KoniCodecImpl pxtone_codec_impl;
 
 static const KoniCodecImpl* available_codecs[] = {
     &dana_codec_impl,
+    &pxtone_codec_impl,
     &ma_codec_impl,
     NULL
 };

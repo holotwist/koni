@@ -66,6 +66,11 @@ add_executable(koni
     src/codecs/codec_registry.c
     src/codecs/dana_codec/dana_codec.c
     src/codecs/dana_codec/metadata.c
+    src/codecs/pxtone_codec/pxtn_tables.c
+    src/codecs/pxtone_codec/pxtn_noise.c
+    src/codecs/pxtone_codec/pxtn_loader.c
+    src/codecs/pxtone_codec/pxtn_synth.c
+    src/codecs/pxtone_codec/pxtone_codec.c
     src/codecs/ma_codec/ma_codec.c
     src/codecs/ma_codec/metadata.c
     src/ui/ui_common.c
@@ -95,6 +100,7 @@ target_include_directories(koni PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/codec_api>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/lyrics_api>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/third_party>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/codecs/pxtone_codec>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/protocols>
 )
 
