@@ -62,9 +62,10 @@ bool db_init(void) {
     // Register custom basename function for path-to-filename fallback sorting
     sqlite3_create_function(db, "basename", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, sql_basename, NULL, NULL);
 
-    // Optimize SQLite for high-read
+    // Optimize SQLite for high-read and cap cache at 2 MB
     sqlite3_exec(db, "PRAGMA journal_mode = WAL;", NULL, NULL, NULL);
     sqlite3_exec(db, "PRAGMA synchronous = NORMAL;", NULL, NULL, NULL);
+    sqlite3_exec(db, "PRAGMA cache_size = -2000;", NULL, NULL, NULL);
 
     const char *schema = 
         "CREATE TABLE IF NOT EXISTS tracks ("
@@ -251,6 +252,48 @@ const char* db_get_sort_name(DBSortMode mode) {
     }
 }
 
+/* 64 KB Chunked String Arena */
+typedef struct StringChunk {
+    struct StringChunk *next;
+    size_t used;
+    size_t capacity;
+    char data[];
+} StringChunk;
+
+static StringChunk *s_track_arena = NULL;
+
+static void arena_free_all(StringChunk **head) {
+    StringChunk *curr = *head;
+    while (curr) {
+        StringChunk *next = curr->next;
+        free(curr);
+        curr = next;
+    }
+    *head = NULL;
+}
+
+static const char* arena_strdup(StringChunk **head, const char *str) {
+    if (!str || str[0] == '\0') return "";
+    size_t len = strlen(str) + 1;
+
+    // Allocate a new 64 KB block if this chunk doesn't have enough remaining space
+    if (!*head || (*head)->used + len > (*head)->capacity) {
+        size_t cap = 65536;
+        if (len > cap) cap = len;
+        StringChunk *chunk = malloc(sizeof(StringChunk) + cap);
+        if (!chunk) return "";
+        chunk->next = *head;
+        chunk->used = 0;
+        chunk->capacity = cap;
+        *head = chunk;
+    }
+
+    char *dest = (*head)->data + (*head)->used;
+    memcpy(dest, str, len);
+    (*head)->used += len;
+    return dest;
+}
+
 int db_load_all_tracks(DBTrack **out_tracks, DBSortMode sort_mode) {
     pthread_mutex_lock(&db_mutex);
     if (!db) { 
@@ -258,6 +301,9 @@ int db_load_all_tracks(DBTrack **out_tracks, DBSortMode sort_mode) {
         pthread_mutex_unlock(&db_mutex); 
         return 0; 
     }
+
+    // Clean up any existing string arena before loading
+    arena_free_all(&s_track_arena);
 
     const char *order_clause;
     switch (sort_mode) {
@@ -297,17 +343,20 @@ int db_load_all_tracks(DBTrack **out_tracks, DBSortMode sort_mode) {
             }
             DBTrack *t = &tracks[count++];
             t->id = sqlite3_column_int64(stmt, 0);
-            strncpy(t->path, (const char *)sqlite3_column_text(stmt, 1), sizeof(t->path) - 1);
             t->mtime = (time_t)sqlite3_column_int64(stmt, 2);
-            strncpy(t->title, (const char *)sqlite3_column_text(stmt, 3), sizeof(t->title) - 1);
-            strncpy(t->artist, (const char *)sqlite3_column_text(stmt, 4), sizeof(t->artist) - 1);
-            strncpy(t->album, (const char *)sqlite3_column_text(stmt, 5), sizeof(t->album) - 1);
             t->duration_sec = sqlite3_column_int(stmt, 6);
             t->has_track_gain = sqlite3_column_int(stmt, 7) ? true : false;
             t->track_gain = (float)sqlite3_column_double(stmt, 8);
 
+            // Store strings in the contiguous 64 KB Arena
+            t->path = arena_strdup(&s_track_arena, (const char *)sqlite3_column_text(stmt, 1));
+            t->title = arena_strdup(&s_track_arena, (const char *)sqlite3_column_text(stmt, 3));
+            t->artist = arena_strdup(&s_track_arena, (const char *)sqlite3_column_text(stmt, 4));
+            t->album = arena_strdup(&s_track_arena, (const char *)sqlite3_column_text(stmt, 5));
+
+            // Sub-slice pointer into t->path directly
             const char *slash = strrchr(t->path, '/');
-            strncpy(t->name, slash ? slash + 1 : t->path, sizeof(t->name) - 1);
+            t->name = slash ? slash + 1 : t->path;
         }
         sqlite3_finalize(stmt);
     }
@@ -319,5 +368,8 @@ int db_load_all_tracks(DBTrack **out_tracks, DBSortMode sort_mode) {
 
 void db_free_tracks(DBTrack *tracks, int count) {
     (void)count;
+    pthread_mutex_lock(&db_mutex);
+    arena_free_all(&s_track_arena);
+    pthread_mutex_unlock(&db_mutex);
     if (tracks) free(tracks);
 }

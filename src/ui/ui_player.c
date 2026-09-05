@@ -125,10 +125,12 @@ void draw_player_panel(int y, int x, int h, int w) {
         if (srate == 0) srate = 44100;
         uint32_t vu_window = (srate * 50u) / 1000u; // 50ms window
         float peak_l = 0.0f, peak_r = 0.0f;
-        for (uint32_t i = 0; i < vu_window; i++) {
+        // Step by 2
+        for (uint32_t i = 0; i < vu_window; i += 2) {
             if (i > ui_cache.smooth_rpos) break;
             uint32_t idx = (ui_cache.smooth_rpos - i) & VIS_BUF_MASK;
-            float l = fabsf(vis_ring_l[idx]); float r = fabsf(vis_ring_r[idx]);
+            float l = vis_ring_l[idx]; if (l < 0.0f) l = -l;
+            float r = vis_ring_r[idx]; if (r < 0.0f) r = -r;
             if (l > peak_l) peak_l = l;
             if (r > peak_r) peak_r = r;
         }

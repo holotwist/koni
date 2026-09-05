@@ -8,11 +8,11 @@
 
 typedef struct {
     int64_t id;
-    char path[1024];
-    char name[256];
-    char title[256];
-    char artist[256];
-    char album[256];
+    const char *path;
+    const char *name;
+    const char *title;
+    const char *artist;
+    const char *album;
     uint32_t duration_sec;
     float track_gain;
     bool has_track_gain;

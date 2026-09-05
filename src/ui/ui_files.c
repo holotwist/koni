@@ -32,10 +32,11 @@ void draw_files_panel(int y, int x, int h, int w) {
     list_h -= search_offset;
 
     static int filtered_map[8192];
-    int total_visible = ui_search_get_filtered_indices(TAB_FILES, filtered_map, 8192);
+    bool search_active = ui_search_is_active();
+    int total_visible = search_active ? ui_search_get_filtered_indices(TAB_FILES, filtered_map, 8192) : num_files;
 
-    int *cur_sel = ui_search_is_active() ? ui_search_get_selected_ptr() : &selected_file_idx;
-    int *cur_scroll = ui_search_is_active() ? ui_search_get_scroll_ptr() : &scroll_offset;
+    int *cur_sel = search_active ? ui_search_get_selected_ptr() : &selected_file_idx;
+    int *cur_scroll = search_active ? ui_search_get_scroll_ptr() : &scroll_offset;
 
     if (list_h > 0 && total_visible > 0) {
         if (*cur_sel >= total_visible) *cur_sel = total_visible - 1;
@@ -55,7 +56,7 @@ void draw_files_panel(int y, int x, int h, int w) {
 
     for (int i = 0; i < list_h && i + *cur_scroll < total_visible; i++) {
         int list_pos = i + *cur_scroll;
-        int idx = filtered_map[list_pos];
+        int idx = search_active ? filtered_map[list_pos] : list_pos;
         
         char item_path[1024];
         snprintf(item_path, sizeof(item_path), "%s/%s", current_dir, files[idx].name);

@@ -13,10 +13,11 @@ void draw_queue_panel(int y, int x, int h, int w) {
     list_h -= search_offset;
 
     static int filtered_map[8192];
-    int total_visible = ui_search_get_filtered_indices(TAB_QUEUE, filtered_map, 8192);
+    bool search_active = ui_search_is_active();
+    int total_visible = search_active ? ui_search_get_filtered_indices(TAB_QUEUE, filtered_map, 8192) : num_playlist_files;
 
-    int *cur_sel = ui_search_is_active() ? ui_search_get_selected_ptr() : &selected_playlist_idx;
-    int *cur_scroll = ui_search_is_active() ? ui_search_get_scroll_ptr() : &playlist_scroll_offset;
+    int *cur_sel = search_active ? ui_search_get_selected_ptr() : &selected_playlist_idx;
+    int *cur_scroll = search_active ? ui_search_get_scroll_ptr() : &playlist_scroll_offset;
 
     if (list_h > 0 && total_visible > 0) {
         if (*cur_sel >= total_visible) *cur_sel = total_visible - 1;
@@ -36,7 +37,7 @@ void draw_queue_panel(int y, int x, int h, int w) {
 
     for (int i = 0; i < list_h && i + *cur_scroll < total_visible; i++) {
         int list_pos = i + *cur_scroll;
-        int idx = filtered_map[list_pos];
+        int idx = search_active ? filtered_map[list_pos] : list_pos;
         bool is_playing = (current_play_source == SOURCE_QUEUE && playing_file_idx == idx);
         
         if (list_pos == *cur_sel) attron(A_REVERSE | COLOR_PAIR(1));
