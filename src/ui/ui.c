@@ -4,6 +4,7 @@
 #include "ui.h"
 #include "ui_common.h"
 #include "ui_input.h"
+#include "extension.h"
 #include "state.h"
 #include "file_list.h"
 #include "lyrics.h"
@@ -79,6 +80,8 @@ static void ui_update_state(void) {
     
     if (abs(diff) > (int32_t)srate) ui_cache.smooth_rpos = target_play_pos;
     else ui_cache.smooth_rpos += nominal_advance + (diff / 5); 
+
+    koni_extensions_on_tick();
 }
 
 typedef struct {

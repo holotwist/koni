@@ -57,16 +57,19 @@ typedef struct {
 
 static void audio_stream_close(AudioStream *stream) {
     if (!stream || !stream->is_open) return;
-    if (stream->codec && stream->dec) {
-        stream->codec->close(stream->dec);
-    }
-    koni_metadata_free(&stream->meta);
+
+    // Disconnect active references under mutex BEFORE freeing decoder memory
     pthread_mutex_lock(&state_mutex);
     if (active_decoder == stream->dec) {
         active_codec = NULL;
         active_decoder = NULL;
     }
     pthread_mutex_unlock(&state_mutex);
+
+    if (stream->codec && stream->dec) {
+        stream->codec->close(stream->dec);
+    }
+    koni_metadata_free(&stream->meta);
     koni_extensions_on_track_stopped();
     memset(stream, 0, sizeof(AudioStream));
 }
@@ -129,6 +132,7 @@ static void apply_stream_to_global_state(const AudioStream *stream) {
     atomic_store(&p_total_sec, (stream->fmt.sample_rate > 0) ? (stream->fmt.total_samples / stream->fmt.sample_rate) : 0);
     atomic_store(&vis_srate, stream->fmt.sample_rate);
     atomic_store(&p_current_sec, 0);
+    atomic_store(&p_frames_consumed, 0);
     atomic_store(&header_ready_for_idx, stream->file_idx);
     atomic_fetch_add(&current_track_id, 1);
 }

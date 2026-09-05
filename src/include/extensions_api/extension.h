@@ -17,9 +17,10 @@ typedef struct KoniHostContext KoniHostContext;
 
 /* UI Panel Descriptor provided by an extension if it contributes a tab */
 typedef struct {
-    int  tab_id;              /* Assigned by host */
-    char tab_label[24];      /* e.g., "3:tracker" */
-    char shortcut_key;       /* e.g., '3' */
+    char tab_name[16];       /* Base name, e.g., "tracker" */
+    int  tab_id;             /* Dynamically assigned by host (3, 4, 5...) */
+    char tab_label[24];      /* Dynamically formatted by host, e.g., "3:tracker" */
+    char shortcut_key;       /* Dynamically assigned by host ('3', '4', ...) */
     void (*render)(KoniExtension *ext, int y, int x, int h, int w);
 } ExtTabDescriptor;
 

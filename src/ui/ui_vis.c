@@ -18,6 +18,8 @@ void draw_vis_panel(int y, int x, int h, int w) {
     // Pass NULL for the title so it doesn't collide with the tabs menu
     ui_draw_box(y, x, h, w, NULL, 1);
 
+    #include "ext_registry.h"
+
     // Tabs Menu
     mvprintw(y, x + 2, " ");
     attron(active_tab == 1 ? A_REVERSE : A_NORMAL); 
@@ -26,9 +28,35 @@ void draw_vis_panel(int y, int x, int h, int w) {
     
     attron(active_tab == 2 ? A_REVERSE : A_NORMAL); printw("2:lyric"); attroff(active_tab == 2 ? A_REVERSE : A_NORMAL); printw(" ");
 
+    // Render dynamic active extension tabs (e.g. 3:tracker)
+    ExtTabDescriptor *ext_tabs[8];
+    KoniExtension *ext_ptrs[8];
+    int ext_tab_count = koni_extensions_get_active_tabs(ext_tabs, ext_ptrs, 8);
+    for (int t = 0; t < ext_tab_count; t++) {
+        attron(active_tab == ext_tabs[t]->tab_id ? A_REVERSE : A_NORMAL);
+        printw("%s", ext_tabs[t]->tab_label);
+        attroff(active_tab == ext_tabs[t]->tab_id ? A_REVERSE : A_NORMAL);
+        printw(" ");
+    }
+
     int draw_w = w - 4;
     int draw_h = h - 4;
     if (draw_w < 1 || draw_h < 1) return;
+
+    // Dispatch rendering to extension tab if active
+    bool ext_tab_rendered = false;
+    for (int t = 0; t < ext_tab_count; t++) {
+        if (active_tab == ext_tabs[t]->tab_id && ext_tabs[t]->render) {
+            ext_tabs[t]->render(ext_ptrs[t], y + 1, x + 1, h - 2, w - 2);
+            ext_tab_rendered = true;
+            return;
+        }
+    }
+
+    // If on an extension tab that deactivated (e.g. switched to non-tracker format), return to visualizer
+    if (active_tab >= 3 && !ext_tab_rendered) {
+        active_tab = 1;
+    }
 
     if (active_tab == 1) {
         if (current_vis_mode == 0) draw_vis_spectrum(y + 2, x + 2, draw_w, draw_h);

@@ -13,8 +13,16 @@
 #include <unistd.h>
 #include <stdlib.h>
 
+#include "extension.h"
+#include "ext_registry.h"
+
 bool ui_handle_input(int ch) {
     if (ui_search_handle_input(ch, current_browser_tab)) {
+        return true;
+    }
+
+    // Allow active extensions to process hotkeys
+    if (koni_extensions_handle_key(ch)) {
         return true;
     }
 
@@ -378,6 +386,19 @@ bool ui_handle_input(int ch) {
         case 'y': case 'Y': show_lrc_overlay = !show_lrc_overlay; break;
         case '+': case '=': if (atomic_load(&volume) < 200) atomic_fetch_add(&volume, 5); break;
         case '-': case '_': if (atomic_load(&volume) > 0) atomic_fetch_sub(&volume, 5); break;
+        default: {
+            // Dynamically match any active extension tab shortcut ('3', '4', '5'...)
+            ExtTabDescriptor *ext_tabs[8];
+            int ext_tab_count = koni_extensions_get_active_tabs(ext_tabs, NULL, 8);
+            for (int t = 0; t < ext_tab_count; t++) {
+                if (ext_tabs[t]->shortcut_key != '\0' && ch == ext_tabs[t]->shortcut_key) {
+                    active_tab = ext_tabs[t]->tab_id;
+                    force_redraw = true;
+                    return true;
+                }
+            }
+            break;
+        }
     }
     
     return true;

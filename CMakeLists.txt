@@ -92,6 +92,7 @@ add_executable(koni
     src/ui/ui_input.c
     src/ui/ui.c
     src/extensions/ext_registry.c
+    src/extensions/tracker/tracker_ext.c
     ${MPRIS_SOURCES}
     ${DANA_SOURCES}
 )

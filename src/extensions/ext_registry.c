@@ -7,11 +7,10 @@
 #include <string.h>
 #include <stdarg.h>
 
-/* Forward declaration of extensions, preparing for a tracker tab */
-// extern KoniExtension tracker_extension;
+extern KoniExtension tracker_extension;
 
 static const KoniExtension *registered_extensions[] = {
-    // &tracker_extension,
+    &tracker_extension,
     NULL
 };
 
@@ -117,6 +116,11 @@ int koni_extensions_get_active_tabs(ExtTabDescriptor **out_tabs, KoniExtension *
     for (int i = 0; registered_extensions[i] && count < max_count; i++) {
         KoniExtension *ext = (KoniExtension*)registered_extensions[i];
         if (ext->provides_tab && is_extension_active(ext)) {
+            int dynamic_tab_id = 3 + count;
+            ext->tab.tab_id = dynamic_tab_id;
+            ext->tab.shortcut_key = (dynamic_tab_id <= 9) ? (char)('0' + dynamic_tab_id) : '\0';
+            snprintf(ext->tab.tab_label, sizeof(ext->tab.tab_label), "%d:%s", 
+                     dynamic_tab_id, ext->tab.tab_name[0] ? ext->tab.tab_name : "ext");
             if (out_tabs) out_tabs[count] = &ext->tab;
             if (out_exts) out_exts[count] = ext;
             count++;
