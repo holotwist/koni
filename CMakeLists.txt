@@ -91,6 +91,7 @@ add_executable(koni
     src/ui/ui_player.c
     src/ui/ui_input.c
     src/ui/ui.c
+    src/extensions/ext_registry.c
     ${MPRIS_SOURCES}
     ${DANA_SOURCES}
 )
@@ -99,6 +100,8 @@ target_include_directories(koni PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/codec_api>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/lyrics_api>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/extensions_api>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/extensions>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/third_party>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/codecs/pxtone_codec>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/protocols>

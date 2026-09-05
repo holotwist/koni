@@ -118,6 +118,9 @@ extern char playing_filepath[1024];
 extern char playing_filename[256];
 extern int playing_file_idx;
 
+extern const KoniCodecImpl *active_codec;
+extern KoniDecoder *active_decoder;
+
 extern KoniAudioFormat p_format;
 extern KoniMetadata p_metadata;
 

@@ -50,6 +50,9 @@ char playing_filepath[1024] = "";
 char playing_filename[256] = "<Empty>";
 int playing_file_idx = -1;
 
+const KoniCodecImpl *active_codec = NULL;
+KoniDecoder *active_decoder = NULL;
+
 KoniAudioFormat p_format = {0};
 KoniMetadata p_metadata = {0};
 

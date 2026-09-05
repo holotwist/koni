@@ -4,6 +4,7 @@
 #include "audio.h"
 #include "ui.h"
 #include "codec.h"
+#include "extension.h"
 #include "protocols/mpris.h"
 #include "vis_math.h"
 #include "config.h"
@@ -51,6 +52,7 @@ int main(int argc, char **argv) {
     file_list_init();
     load_directory(".");
     vis_math_init();
+    koni_extensions_init();
     
     // Expose DBus methods and properties
     mpris_init();
@@ -63,6 +65,7 @@ int main(int argc, char **argv) {
     atomic_store(&current_cmd_atomic, CMD_QUIT);
     pthread_join(audio_thread, NULL);
     
+    koni_extensions_shutdown();
     mpris_shutdown();
     library_scanner_shutdown();
     save_state(); // Dump state before exiting
