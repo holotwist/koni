@@ -3,6 +3,7 @@
 
 #include "ui_input.h"
 #include "ui_common.h"
+#include "ui_keybinds.h"
 #include "state.h"
 #include "config.h"
 #include "lyrics.h"
@@ -12,9 +13,93 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <time.h>
 
 #include "extension.h"
 #include "ext_registry.h"
+
+static void browser_navigate_delta(int delta) {
+    int *sel = NULL;
+    int max = 0;
+
+    switch (current_browser_tab) {
+        case TAB_FILES:
+            sel = &selected_file_idx;
+            max = num_files;
+            break;
+        case TAB_QUEUE:
+            sel = &selected_playlist_idx;
+            max = num_playlist_files;
+            break;
+        case TAB_MUSIC:
+            sel = &selected_library_idx;
+            max = num_library_tracks;
+            break;
+    }
+
+    if (!sel || max <= 0) return;
+
+    *sel += delta;
+    if (*sel < 0) *sel = 0;
+    if (*sel >= max) *sel = max - 1;
+}
+
+static void browser_navigate_to(bool to_bottom) {
+    int *sel = NULL;
+    int max = 0;
+
+    switch (current_browser_tab) {
+        case TAB_FILES:
+            sel = &selected_file_idx;
+            max = num_files;
+            break;
+        case TAB_QUEUE:
+            sel = &selected_playlist_idx;
+            max = num_playlist_files;
+            break;
+        case TAB_MUSIC:
+            sel = &selected_library_idx;
+            max = num_library_tracks;
+            break;
+    }
+
+    if (!sel || max <= 0) return;
+
+    *sel = to_bottom ? (max - 1) : 0;
+}
+
+static void perform_seek_relative(int delta_ms) {
+    if (atomic_load(&play_state_atomic) == STATE_STOPPED) return;
+
+    uint32_t srate = atomic_load(&vis_srate);
+    if (srate == 0) srate = 44100;
+
+    static int s_last_target_ms = -1;
+    static struct timespec s_last_seek_time = {0};
+
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    long elapsed_ms = (now.tv_sec - s_last_seek_time.tv_sec) * 1000 +
+                      (now.tv_nsec - s_last_seek_time.tv_nsec) / 1000000;
+
+    int base_ms;
+    if (s_last_target_ms >= 0 && elapsed_ms < 400) {
+        base_ms = s_last_target_ms;
+    } else {
+        base_ms = (int)(((uint64_t)atomic_load(&p_frames_consumed) * 1000ULL) / srate);
+    }
+
+    int t_ms = base_ms + delta_ms;
+    int tot_ms = (int)atomic_load(&p_total_sec) * 1000;
+    if (tot_ms > 0 && t_ms > tot_ms) t_ms = tot_ms - 1000;
+    if (t_ms < 0) t_ms = 0;
+
+    s_last_target_ms = t_ms;
+    s_last_seek_time = now;
+
+    atomic_store(&seek_target_ms, t_ms);
+    atomic_store(&current_cmd_atomic, CMD_SEEK);
+}
 
 bool ui_handle_input(int ch) {
     if (ui_search_handle_input(ch, current_browser_tab)) {
@@ -81,28 +166,30 @@ bool ui_handle_input(int ch) {
         }
     }
 
-    switch (ch) {
-        case 'q': case 'Q':
+    UIAction action = ui_keybinds_get_action(ch);
+
+    switch (action) {
+        case ACTION_QUIT:
             atomic_store(&current_cmd_atomic, CMD_QUIT);
             return false;
             
-        case '/':
+        case ACTION_SEARCH:
             ui_search_open();
             break;
 
-        case 'h': case 'H':
+        case ACTION_HELP:
             show_help_bar = !show_help_bar;
             break;
             
-        case '\t':
+        case ACTION_SWITCH_TAB:
             current_browser_tab = (current_browser_tab + 1) % 3;
             break;
             
-        case 'u': case 'U':
+        case ACTION_RESCAN:
             library_scanner_start();
             break;
 
-        case 'o': case 'O':
+        case ACTION_SORT:
             if (current_browser_tab == TAB_MUSIC) {
                 current_library_sort = (DBSortMode)((current_library_sort + 1) % DB_SORT_COUNT);
                 library_reload();
@@ -111,41 +198,39 @@ bool ui_handle_input(int ch) {
             }
             break;
 
-        case KEY_UP:
-            if (current_browser_tab == TAB_FILES && selected_file_idx > 0) selected_file_idx--;
-            else if (current_browser_tab == TAB_QUEUE && selected_playlist_idx > 0) selected_playlist_idx--;
-            else if (current_browser_tab == TAB_MUSIC && selected_library_idx > 0) selected_library_idx--;
+        case ACTION_UP:
+            browser_navigate_delta(-1);
             break;
             
-        case KEY_DOWN:
-            if (current_browser_tab == TAB_FILES && selected_file_idx < num_files - 1) selected_file_idx++;
-            else if (current_browser_tab == TAB_QUEUE && selected_playlist_idx < num_playlist_files - 1) selected_playlist_idx++;
-            else if (current_browser_tab == TAB_MUSIC && selected_library_idx < num_library_tracks - 1) selected_library_idx++;
+        case ACTION_DOWN:
+            browser_navigate_delta(1);
+            break;
+
+        case ACTION_PAGE_UP:
+            browser_navigate_delta(-10);
+            break;
+
+        case ACTION_PAGE_DOWN:
+            browser_navigate_delta(10);
+            break;
+
+        case ACTION_TOP:
+            browser_navigate_to(false);
+            break;
+
+        case ACTION_BOTTOM:
+            browser_navigate_to(true);
             break;
             
-        case KEY_LEFT:
-            if (atomic_load(&play_state_atomic) != STATE_STOPPED) {
-                int base_ms = (atomic_load(&current_cmd_atomic) == CMD_SEEK) ? atomic_load(&seek_target_ms) : (atomic_load(&p_current_sec) * 1000);
-                int t_ms = base_ms - 5000;
-                if (t_ms < 0) t_ms = 0;
-                atomic_store(&seek_target_ms, t_ms);
-                atomic_store(&current_cmd_atomic, CMD_SEEK);
-            }
+        case ACTION_SEEK_BACK:
+            perform_seek_relative(-5000);
+            break;
+
+        case ACTION_SEEK_FWD:
+            perform_seek_relative(5000);
             break;
             
-        case KEY_RIGHT:
-            if (atomic_load(&play_state_atomic) != STATE_STOPPED) {
-                int base_ms = (atomic_load(&current_cmd_atomic) == CMD_SEEK) ? atomic_load(&seek_target_ms) : (atomic_load(&p_current_sec) * 1000);
-                int t_ms = base_ms + 5000;
-                int tot_ms = atomic_load(&p_total_sec) * 1000;
-                if (t_ms > tot_ms) t_ms = tot_ms - 1000;
-                if (t_ms < 0) t_ms = 0;
-                atomic_store(&seek_target_ms, t_ms);
-                atomic_store(&current_cmd_atomic, CMD_SEEK);
-            }
-            break;
-            
-        case 'a':
+        case ACTION_ADD:
             if (current_browser_tab == TAB_FILES && num_files > 0) {
                 if (!files[selected_file_idx].is_dir) {
                     pthread_mutex_lock(&state_mutex);
@@ -182,7 +267,7 @@ bool ui_handle_input(int ch) {
             }
             break;
             
-        case 'A':
+        case ACTION_ADD_ALL:
             if (current_browser_tab == TAB_FILES) {
                 pthread_mutex_lock(&state_mutex);
                 for (int i = 0; i < num_files; i++) {
@@ -223,7 +308,7 @@ bool ui_handle_input(int ch) {
             }
             break;
             
-        case 'w': case 'W':
+        case ACTION_CLEAR_QUEUE:
             if (current_browser_tab == TAB_QUEUE) {
                 pthread_mutex_lock(&state_mutex);
                 for (int i = 0; i < num_playlist_files; i++) koni_metadata_free(&playlist[i].meta);
@@ -234,7 +319,7 @@ bool ui_handle_input(int ch) {
             }
             break;
             
-        case 'd': case KEY_DC: case KEY_BACKSPACE: case 127:
+        case ACTION_DELETE:
             if (current_browser_tab == TAB_QUEUE && num_playlist_files > 0) {
                 pthread_mutex_lock(&state_mutex);
                 koni_metadata_free(&playlist[selected_playlist_idx].meta);
@@ -255,14 +340,13 @@ bool ui_handle_input(int ch) {
             }
             break;
             
-        case 10: // Enter
+        case ACTION_PLAY_SELECT:
             if (current_browser_tab == TAB_FILES) {
                 if (files[selected_file_idx].is_dir) {
                     char new_path[1024]; snprintf(new_path, sizeof(new_path), "%s/%s", current_dir, files[selected_file_idx].name);
                     if (chdir(new_path) == 0) { if (getcwd(current_dir, sizeof(current_dir)) != NULL) load_directory("."); }
                 } else {
                     pthread_mutex_lock(&state_mutex);
-                    // Snapshot the playable audio files of the current folder context
                     for (int i = 0; i < active_folder.count; i++) free(active_folder.file_names[i]);
                     free(active_folder.file_names);
                     active_folder.file_names = NULL;
@@ -319,20 +403,18 @@ bool ui_handle_input(int ch) {
             }
             break;
             
-        case 's': case 'S':
+        case ACTION_SHUFFLE:
             if (current_browser_tab == TAB_FILES && num_files > 0 && files[selected_file_idx].is_dir) {
                 if (strcmp(files[selected_file_idx].name, "..") == 0) break;
                 char target_path[1024];
                 snprintf(target_path, sizeof(target_path), "%s/%s", current_dir, files[selected_file_idx].name);
 
                 if (config_is_music_dir(target_path)) {
-                    // Already selected: remove it and rescan
                     config_remove_music_dir(target_path);
                     library_scanner_start();
                 } else {
                     char *parent = NULL;
                     if (config_find_parent_music_dir(target_path, &parent)) {
-                        // Superior folder already selected: safeguard prompt
                         folder_dialog.active = true;
                         snprintf(folder_dialog.message, sizeof(folder_dialog.message),
                                  "Parent '%.40s' is already scanned. Add anyway? (y/n)", parent ? parent : "");
@@ -347,15 +429,16 @@ bool ui_handle_input(int ch) {
                 atomic_store(&play_mode_shuffle, !atomic_load(&play_mode_shuffle));
             }
             break;
-        case 'r': case 'R': {
+
+        case ACTION_REPEAT: {
             int r = atomic_load(&play_mode_repeat);
             atomic_store(&play_mode_repeat, (r + 1) % 3);
             break;
         }
-        case 'g': case 'G': {
+
+        case ACTION_REPLAYGAIN: {
             int current_rg = atomic_load(&play_mode_rgain);
             if (current_rg == 0) {
-                // If meta not available, jump to Calc
                 atomic_store(&play_mode_rgain, ui_cache.meta.has_track_gain ? 1 : 2);
             } else if (current_rg == 1) {
                 atomic_store(&play_mode_rgain, ui_cache.meta.has_track_gain ? 2 : 0);
@@ -364,8 +447,12 @@ bool ui_handle_input(int ch) {
             }
             break;
         }
-        case 'l': case 'L': force_vertical_layout = !force_vertical_layout; break;
-        case 'm': case 'M': {
+
+        case ACTION_LAYOUT:
+            force_vertical_layout = !force_vertical_layout;
+            break;
+
+        case ACTION_MUTE: {
             int cur_vol = atomic_load(&volume);
             if (cur_vol > 0) {
                 saved_volume = cur_vol;
@@ -375,17 +462,51 @@ bool ui_handle_input(int ch) {
             }
             break;
         }
-        case ' ': case 'p': atomic_store(&current_cmd_atomic, CMD_PAUSE); break;
-        case 'n': case '>': atomic_store(&current_cmd_atomic, CMD_NEXT); break;
-        case 'b': case '<': atomic_store(&current_cmd_atomic, CMD_PREV); break;
-        case '1': active_tab = 1; break;
-        case '2': active_tab = 2; break;
-        case 'c': case 'C': if (active_tab == 1) current_vis_mode = (current_vis_mode + 1) % 4; break;
-        case 'f': case 'F': is_fullscreen = !is_fullscreen; break;
-        case 'v': case 'V': show_visualizer = !show_visualizer; break;
-        case 'y': case 'Y': show_lrc_overlay = !show_lrc_overlay; break;
-        case '+': case '=': if (atomic_load(&volume) < 200) atomic_fetch_add(&volume, 5); break;
-        case '-': case '_': if (atomic_load(&volume) > 0) atomic_fetch_sub(&volume, 5); break;
+
+        case ACTION_PLAY_PAUSE:
+            atomic_store(&current_cmd_atomic, CMD_PAUSE);
+            break;
+
+        case ACTION_NEXT:
+            atomic_store(&current_cmd_atomic, CMD_NEXT);
+            break;
+
+        case ACTION_PREV:
+            atomic_store(&current_cmd_atomic, CMD_PREV);
+            break;
+
+        case ACTION_TAB_VIS:
+            active_tab = 1;
+            break;
+
+        case ACTION_TAB_LYRICS:
+            active_tab = 2;
+            break;
+
+        case ACTION_VIS_MODE:
+            if (active_tab == 1) current_vis_mode = (current_vis_mode + 1) % 4;
+            break;
+
+        case ACTION_FULLSCREEN:
+            is_fullscreen = !is_fullscreen;
+            break;
+
+        case ACTION_TOGGLE_VIS:
+            show_visualizer = !show_visualizer;
+            break;
+
+        case ACTION_TOGGLE_LRC:
+            show_lrc_overlay = !show_lrc_overlay;
+            break;
+
+        case ACTION_VOL_UP:
+            if (atomic_load(&volume) < 200) atomic_fetch_add(&volume, 5);
+            break;
+
+        case ACTION_VOL_DOWN:
+            if (atomic_load(&volume) > 0) atomic_fetch_sub(&volume, 5);
+            break;
+
         default: {
             // Dynamically match any active extension tab shortcut ('3', '4', '5'...)
             ExtTabDescriptor *ext_tabs[8];
@@ -400,6 +521,6 @@ bool ui_handle_input(int ch) {
             break;
         }
     }
-    
+
     return true;
 }

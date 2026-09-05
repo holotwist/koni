@@ -172,8 +172,9 @@ void load_state(void) {
 
     char line[1024];
     while (fgets(line, sizeof(line), f)) {
-        char *key = strtok(line, "=");
-        char *val = strtok(NULL, "\n");
+        char *saveptr = NULL;
+        char *key = strtok_r(line, "=", &saveptr);
+        char *val = strtok_r(NULL, "\n", &saveptr);
         if (key && val) {
             if (strcmp(key, "current_dir") == 0) strncpy(current_dir, val, sizeof(current_dir)-1);
             else if (strcmp(key, "volume") == 0) atomic_store(&volume, atoi(val));
@@ -185,6 +186,8 @@ void load_state(void) {
             else if (strcmp(key, "layout") == 0) force_vertical_layout = atoi(val) ? true : false;
             else if (strcmp(key, "show_visualizer") == 0) show_visualizer = atoi(val) ? true : false;
             else if (strcmp(key, "show_lrc_overlay") == 0) show_lrc_overlay = atoi(val) ? true : false;
+            else if (strcmp(key, "active_tab") == 0) active_tab = atoi(val);
+            else if (strcmp(key, "browser_tab") == 0) current_browser_tab = (BrowserTab)atoi(val);
         }
     }
     fclose(f);
@@ -215,6 +218,8 @@ void save_state(void) {
     fprintf(f, "layout=%d\n", force_vertical_layout ? 1 : 0);
     fprintf(f, "show_visualizer=%d\n", show_visualizer ? 1 : 0);
     fprintf(f, "show_lrc_overlay=%d\n", show_lrc_overlay ? 1 : 0);
+    fprintf(f, "active_tab=%d\n", active_tab);
+    fprintf(f, "browser_tab=%d\n", (int)current_browser_tab);
     
     fclose(f);
     save_playlist_queue();

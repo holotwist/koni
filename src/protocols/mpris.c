@@ -12,11 +12,84 @@ static pthread_t mpris_thread;
 static DBusConnection *dbus_conn = NULL;
 static bool mpris_running = false;
 
+static void sanitize_utf8(char *dst, const char *src, size_t dst_size) {
+    if (!dst || dst_size == 0) return;
+    if (!src) { dst[0] = '\0'; return; }
+
+    size_t di = 0;
+    const unsigned char *s = (const unsigned char *)src;
+
+    while (*s && di + 1 < dst_size) {
+        unsigned char c = *s;
+        if (c < 0x80) { // ASCII
+            dst[di++] = (char)c;
+            s++;
+        } else if ((c >= 0xC2 && c <= 0xDF) && (s[1] >= 0x80 && s[1] <= 0xBF)) { // 2-byte
+            if (di + 2 >= dst_size) break;
+            dst[di++] = (char)s[0];
+            dst[di++] = (char)s[1];
+            s += 2;
+        } else if (c == 0xE0 && (s[1] >= 0xA0 && s[1] <= 0xBF) && (s[2] >= 0x80 && s[2] <= 0xBF)) { // 3-byte E0
+            if (di + 3 >= dst_size) break;
+            dst[di++] = (char)s[0];
+            dst[di++] = (char)s[1];
+            dst[di++] = (char)s[2];
+            s += 3;
+        } else if (((c >= 0xE1 && c <= 0xEC) || c == 0xEE || c == 0xEF) &&
+                   (s[1] >= 0x80 && s[1] <= 0xBF) && (s[2] >= 0x80 && s[2] <= 0xBF)) { // 3-byte general
+            if (di + 3 >= dst_size) break;
+            dst[di++] = (char)s[0];
+            dst[di++] = (char)s[1];
+            dst[di++] = (char)s[2];
+            s += 3;
+        } else if (c == 0xED && (s[1] >= 0x80 && s[1] <= 0x9F) && (s[2] >= 0x80 && s[2] <= 0xBF)) { // 3-byte ED (exclude surrogates)
+            if (di + 3 >= dst_size) break;
+            dst[di++] = (char)s[0];
+            dst[di++] = (char)s[1];
+            dst[di++] = (char)s[2];
+            s += 3;
+        } else if (c == 0xF0 && (s[1] >= 0x90 && s[1] <= 0xBF) &&
+                   (s[2] >= 0x80 && s[2] <= 0xBF) && (s[3] >= 0x80 && s[3] <= 0xBF)) { // 4-byte F0
+            if (di + 4 >= dst_size) break;
+            dst[di++] = (char)s[0];
+            dst[di++] = (char)s[1];
+            dst[di++] = (char)s[2];
+            dst[di++] = (char)s[3];
+            s += 4;
+        } else if ((c >= 0xF1 && c <= 0xF3) && (s[1] >= 0x80 && s[1] <= 0xBF) &&
+                   (s[2] >= 0x80 && s[2] <= 0xBF) && (s[3] >= 0x80 && s[3] <= 0xBF)) { // 4-byte F1-F3
+            if (di + 4 >= dst_size) break;
+            dst[di++] = (char)s[0];
+            dst[di++] = (char)s[1];
+            dst[di++] = (char)s[2];
+            dst[di++] = (char)s[3];
+            s += 4;
+        } else if (c == 0xF4 && (s[1] >= 0x80 && s[1] <= 0x8F) &&
+                   (s[2] >= 0x80 && s[2] <= 0xBF) && (s[3] >= 0x80 && s[3] <= 0xBF)) { // 4-byte F4
+            if (di + 4 >= dst_size) break;
+            dst[di++] = (char)s[0];
+            dst[di++] = (char)s[1];
+            dst[di++] = (char)s[2];
+            dst[di++] = (char)s[3];
+            s += 4;
+        } else {
+            // Replace invalid byte with '?'
+            dst[di++] = '?';
+            s++;
+        }
+    }
+    dst[di] = '\0';
+}
+
 static void append_variant_string(DBusMessageIter *iter, const char *val)
 {
+    char clean[1024];
+    sanitize_utf8(clean, val, sizeof(clean));
+    const char *clean_p = clean;
+
     DBusMessageIter variant;
     dbus_message_iter_open_container(iter, DBUS_TYPE_VARIANT, "s", &variant);
-    dbus_message_iter_append_basic(&variant, DBUS_TYPE_STRING, &val);
+    dbus_message_iter_append_basic(&variant, DBUS_TYPE_STRING, &clean_p);
     dbus_message_iter_close_container(iter, &variant);
 }
 
@@ -110,7 +183,10 @@ static void append_metadata_variant(DBusMessageIter *iter)
             DBusMessageIter artist_var, artist_arr;
             dbus_message_iter_open_container(&dict_entry, DBUS_TYPE_VARIANT, "as", &artist_var);
             dbus_message_iter_open_container(&artist_var, DBUS_TYPE_ARRAY, "s", &artist_arr);
-            dbus_message_iter_append_basic(&artist_arr, DBUS_TYPE_STRING, &p_metadata.artist);
+            char clean_artist[512];
+            sanitize_utf8(clean_artist, p_metadata.artist, sizeof(clean_artist));
+            const char *clean_artist_p = clean_artist;
+            dbus_message_iter_append_basic(&artist_arr, DBUS_TYPE_STRING, &clean_artist_p);
             dbus_message_iter_close_container(&artist_var, &artist_arr);
             dbus_message_iter_close_container(&dict_entry, &artist_var);
             dbus_message_iter_close_container(&dict, &dict_entry);

@@ -57,17 +57,25 @@ void draw_musiclist_panel(int y, int x, int h, int w) {
         else if (is_playing) attron(A_BOLD | COLOR_PAIR(4));
         else attron(COLOR_PAIR(2));
 
-        KoniMetadata meta = {
-            .title = library_tracks[idx].title[0] ? library_tracks[idx].title : NULL,
-            .artist = library_tracks[idx].artist[0] ? library_tracks[idx].artist : NULL,
-            .album = library_tracks[idx].album[0] ? library_tracks[idx].album : NULL,
-            .has_track_gain = library_tracks[idx].has_track_gain,
-            .track_gain = library_tracks[idx].track_gain
-        };
+        char track_name[256] = {0};
+        uint32_t dur = 0;
+        KoniMetadata meta = {0};
+
+        pthread_mutex_lock(&state_mutex);
+        if (library_tracks && idx < num_library_tracks) {
+            strncpy(track_name, library_tracks[idx].name, sizeof(track_name) - 1);
+            dur = library_tracks[idx].duration_sec;
+            meta.title = library_tracks[idx].title[0] ? library_tracks[idx].title : NULL;
+            meta.artist = library_tracks[idx].artist[0] ? library_tracks[idx].artist : NULL;
+            meta.album = library_tracks[idx].album[0] ? library_tracks[idx].album : NULL;
+            meta.has_track_gain = library_tracks[idx].has_track_gain;
+            meta.track_gain = library_tracks[idx].track_gain;
+        }
+        pthread_mutex_unlock(&state_mutex);
 
         char formatted_name[512] = {0};
-        format_list_item(formatted_name, sizeof(formatted_name), max_disp_len, library_tracks[idx].name, 
-                         &meta, library_tracks[idx].duration_sec, false);
+        format_list_item(formatted_name, sizeof(formatted_name), max_disp_len, track_name, 
+                         &meta, dur, false);
 
         char disp_buf[1024] = {0};
         int text_w = utf8_display_width(formatted_name);

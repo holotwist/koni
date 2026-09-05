@@ -89,8 +89,9 @@ void draw_player_panel(int y, int x, int h, int w) {
         int bar_w = (x + w - 2) - bar_start;
         
         if (bar_w > 2) {
-            float progress = (tot_sec > 0) ? (float)cur_sec / tot_sec : 0.0f;
+            float progress = (tot_sec > 0) ? ((float)cur_sec / (float)tot_sec) : 0.0f;
             if (progress > 1.0f) progress = 1.0f;
+            if (progress < 0.0f) progress = 0.0f;
             
             int inner_w = bar_w - 2; // Subtract space for [ and ]
             int filled_w = (int)(progress * inner_w);
@@ -116,7 +117,7 @@ void draw_player_panel(int y, int x, int h, int w) {
     }
     
     // VU-meter
-    if (h >= 5) {
+    if (h >= 5 && w >= 22) {
         int vu_y = y + 3;
         int center_x = x + (w / 2);
         

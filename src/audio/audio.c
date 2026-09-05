@@ -16,6 +16,9 @@
 #include <unistd.h>
 #include <time.h>
 
+static atomic_ullong p_track_base_hw = 0;
+static atomic_ullong p_track_base_sample = 0;
+
 static void data_callback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount) {
     (void)pInput;
     ma_pcm_rb* pRingBuffer = (ma_pcm_rb*)pDevice->pUserData;
@@ -42,8 +45,9 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* pInput,
 
     if (framesReadTotal > 0) {
         unsigned long long hw = atomic_fetch_add(&p_hw_frames_played, framesReadTotal) + framesReadTotal;
-        unsigned long long start = atomic_load(&p_track_hw_start);
-        unsigned long long track_frames = (hw >= start) ? (hw - start) : 0;
+        unsigned long long base_hw = atomic_load(&p_track_base_hw);
+        unsigned long long base_sample = atomic_load(&p_track_base_sample);
+        unsigned long long track_frames = (hw >= base_hw) ? (base_sample + (hw - base_hw)) : base_sample;
         atomic_store(&p_frames_consumed, (uint32_t)track_frames);
     }
 }
@@ -68,12 +72,14 @@ static void audio_stream_close(AudioStream *stream) {
     if (!stream || !stream->is_open) return;
 
     // Disconnect active references under mutex before freeing decoder memory
-    pthread_mutex_lock(&state_mutex);
     if (active_decoder == stream->dec) {
-        active_codec = NULL;
-        active_decoder = NULL;
+        pthread_mutex_lock(&state_mutex);
+        if (active_decoder == stream->dec) {
+            active_codec = NULL;
+            active_decoder = NULL;
+        }
+        pthread_mutex_unlock(&state_mutex);
     }
-    pthread_mutex_unlock(&state_mutex);
 
     if (stream->codec && stream->dec) {
         stream->codec->close(stream->dec);
@@ -100,6 +106,10 @@ static bool audio_stream_open(AudioStream *stream, const char *path, const char 
     uint32_t dur = 0;
     if (codec->read_metadata) {
         codec->read_metadata(path, &meta, &dur);
+    }
+
+    if (fmt.total_samples == 0 && dur > 0 && fmt.sample_rate > 0) {
+        fmt.total_samples = (uint64_t)dur * fmt.sample_rate;
     }
 
     strncpy(stream->filepath, path, sizeof(stream->filepath) - 1);
@@ -213,7 +223,8 @@ void *audio_thread_func(void *arg) {
             cur_stream.reached_eof = false;
             cur_stream.frames_decoded = 0;
 
-            atomic_store(&p_track_hw_start, hw_now);
+            atomic_store(&p_track_base_hw, hw_now);
+            atomic_store(&p_track_base_sample, 0);
             atomic_store(&p_frames_consumed, 0);
             apply_stream_to_global_state(&cur_stream);
 
@@ -249,13 +260,9 @@ void *audio_thread_func(void *arg) {
             current_device_fmt.num_channels != cur_stream.fmt.num_channels) {
             
             if (device_initialized) {
-                ma_uint32 available = ma_pcm_rb_available_read(&ring_buffer);
-                while (available > 0 && atomic_load(&current_cmd_atomic) == CMD_NONE) {
-                    nanosleep(&sleep_ts, NULL);
-                    available = ma_pcm_rb_available_read(&ring_buffer);
-                }
                 ma_device_uninit(&device);
                 ma_pcm_rb_uninit(&ring_buffer);
+                device_initialized = false;
             }
 
             ma_pcm_rb_init(ma_format_s32, cur_stream.fmt.num_channels, cur_stream.fmt.sample_rate / 2, NULL, NULL, &ring_buffer);
@@ -308,8 +315,8 @@ void *audio_thread_func(void *arg) {
                         ma_pcm_rb_reset(&ring_buffer);
 
                         unsigned long long hw_now = atomic_load(&p_hw_frames_played);
-                        cur_stream.hw_start_frame = (hw_now >= target_sample) ? (hw_now - target_sample) : 0;
-                        atomic_store(&p_track_hw_start, cur_stream.hw_start_frame);
+                        atomic_store(&p_track_base_hw, hw_now);
+                        atomic_store(&p_track_base_sample, target_sample);
                         atomic_store(&p_frames_consumed, (uint32_t)target_sample);
                         atomic_store(&p_current_sec, (uint32_t)(target_sample / cur_stream.fmt.sample_rate));
 
@@ -339,7 +346,8 @@ void *audio_thread_func(void *arg) {
                 if (hw_played >= next_stream.hw_start_frame) {
                     // Track 1 has completely finished at the speakers
                     // Track 2 starts sounding right now
-                    atomic_store(&p_track_hw_start, next_stream.hw_start_frame);
+                    atomic_store(&p_track_base_hw, next_stream.hw_start_frame);
+                    atomic_store(&p_track_base_sample, 0);
                     unsigned long long consumed = hw_played - next_stream.hw_start_frame;
                     atomic_store(&p_frames_consumed, (uint32_t)consumed);
 
@@ -487,6 +495,15 @@ void *audio_thread_func(void *arg) {
                 audio_stream_close(&cur_stream);
                 cur_stream = next_stream;
                 memset(&next_stream, 0, sizeof(AudioStream));
+
+                unsigned long long hw_now = atomic_load(&p_hw_frames_played);
+                cur_stream.hw_start_frame = hw_now;
+                cur_stream.hw_end_frame = 0;
+                cur_stream.reached_eof = false;
+                atomic_store(&p_track_base_hw, hw_now);
+                atomic_store(&p_track_base_sample, 0);
+                atomic_store(&p_frames_consumed, 0);
+
                 apply_stream_to_global_state(&cur_stream);
             } else if (player_advance_track(CMD_NEXT_AUTO)) {
                 audio_stream_close(&cur_stream);
@@ -501,6 +518,14 @@ void *audio_thread_func(void *arg) {
                 pthread_mutex_unlock(&state_mutex);
 
                 if (audio_stream_open(&cur_stream, path, name, idx)) {
+                    unsigned long long hw_now = atomic_load(&p_hw_frames_played);
+                    cur_stream.hw_start_frame = hw_now;
+                    cur_stream.hw_end_frame = 0;
+                    cur_stream.reached_eof = false;
+                    atomic_store(&p_track_base_hw, hw_now);
+                    atomic_store(&p_track_base_sample, 0);
+                    atomic_store(&p_frames_consumed, 0);
+
                     apply_stream_to_global_state(&cur_stream);
                 } else {
                     atomic_store(&play_state_atomic, STATE_STOPPED);

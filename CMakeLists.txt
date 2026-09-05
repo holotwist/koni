@@ -91,6 +91,7 @@ add_executable(koni
     src/ui/visualizers/vis_ellipse.c
     src/ui/visualizers/vis_lissajous.c
     src/ui/ui_player.c
+    src/ui/ui_keybinds.c
     src/ui/ui_input.c
     src/ui/ui.c
     src/extensions/ext_registry.c

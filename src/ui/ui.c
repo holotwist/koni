@@ -31,6 +31,7 @@ static void ui_update_state(void) {
         strncpy(ui_cache.filepath, playing_filepath, sizeof(ui_cache.filepath) - 1);
         ui_cache.filepath[sizeof(ui_cache.filepath) - 1] = '\0';
         ui_cache.header_loaded_for_idx = -2;
+        ui_cache.smooth_rpos = 0;
         if (ui_cache.lrc_doc) {
             lyric_document_free(ui_cache.lrc_doc);
             ui_cache.lrc_doc = NULL;

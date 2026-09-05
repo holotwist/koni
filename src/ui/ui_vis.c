@@ -1,5 +1,6 @@
 #include "ui_common.h"
 #include "config.h"
+#include "ext_registry.h"
 #include "visualizers/visualizers.h"
 #include <string.h>
 #include <stdlib.h>
@@ -17,8 +18,6 @@ void draw_vis_panel(int y, int x, int h, int w) {
     
     // Pass NULL for the title so it doesn't collide with the tabs menu
     ui_draw_box(y, x, h, w, NULL, 1);
-
-    #include "ext_registry.h"
 
     // Tabs Menu
     mvprintw(y, x + 2, " ");

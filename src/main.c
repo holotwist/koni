@@ -69,6 +69,7 @@ int main(int argc, char **argv) {
     mpris_shutdown();
     library_scanner_shutdown();
     save_state(); // Dump state before exiting
+    config_save(); // Save configuration
     file_list_shutdown();
     db_shutdown();
     config_cleanup();

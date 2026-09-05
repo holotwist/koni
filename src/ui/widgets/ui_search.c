@@ -140,6 +140,32 @@ bool ui_search_handle_input(int ch, BrowserTab tab) {
         return true;
     }
 
+    if (ch == KEY_PPAGE) {
+        search_state.selected_idx -= 10;
+        if (search_state.selected_idx < 0) search_state.selected_idx = 0;
+        return true;
+    }
+
+    if (ch == KEY_NPAGE) {
+        static int map[65536];
+        int count = ui_search_get_filtered_indices(tab, map, 65536);
+        search_state.selected_idx += 10;
+        if (search_state.selected_idx >= count) search_state.selected_idx = (count > 0) ? count - 1 : 0;
+        return true;
+    }
+
+    if (ch == KEY_HOME) {
+        search_state.selected_idx = 0;
+        return true;
+    }
+
+    if (ch == KEY_END) {
+        static int map[65536];
+        int count = ui_search_get_filtered_indices(tab, map, 65536);
+        search_state.selected_idx = (count > 0) ? count - 1 : 0;
+        return true;
+    }
+
     if (ch == 10) { // Enter, select item and close search
         static int map[65536];
         int count = ui_search_get_filtered_indices(tab, map, 65536);

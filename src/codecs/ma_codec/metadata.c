@@ -54,9 +54,22 @@ static uint8_t* base64_decode(const char* src, size_t len, size_t* out_len) {
 
 static char* decode_id3_string(const uint8_t* data, size_t size, uint8_t encoding) {
     if (size == 0) return strdup("");
-    if (encoding == 0 || encoding == 3) {
+    if (encoding == 3) { // UTF-8
         char* str = calloc(1, size + 1);
         memcpy(str, data, size);
+        return str;
+    } else if (encoding == 0) { // ISO-8859-1 (Latin-1) -> UTF-8
+        char* str = calloc(1, size * 2 + 1);
+        size_t out_idx = 0;
+        for (size_t i = 0; i < size; i++) {
+            uint8_t b = data[i];
+            if (b < 0x80) {
+                str[out_idx++] = (char)b;
+            } else {
+                str[out_idx++] = (char)(0xC0 | (b >> 6));
+                str[out_idx++] = (char)(0x80 | (b & 0x3F));
+            }
+        }
         return str;
     } else if (encoding == 1 || encoding == 2) {
         char* str = calloc(1, size * 2 + 1);
