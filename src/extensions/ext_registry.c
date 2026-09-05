@@ -44,6 +44,42 @@ static void* host_query_codec_interface(KoniInterfaceID iface_id) {
     return NULL;
 }
 
+static uint32_t host_get_current_frame(void) {
+    return atomic_load(&p_frames_consumed);
+}
+
+static uint32_t host_get_current_sec(void) {
+    return atomic_load(&p_current_sec);
+}
+
+static uint32_t host_get_duration_sec(void) {
+    return atomic_load(&p_total_sec);
+}
+
+static uint32_t host_get_sample_rate(void) {
+    return atomic_load(&vis_srate);
+}
+
+static uint16_t host_get_num_channels(void) {
+    return p_format.num_channels;
+}
+
+static int host_get_track_id(void) {
+    return atomic_load(&current_track_id);
+}
+
+static const KoniMetadata* host_get_current_metadata(void) {
+    return &p_metadata;
+}
+
+static int host_get_play_state(void) {
+    return atomic_load(&play_state_atomic);
+}
+
+static int host_get_volume(void) {
+    return atomic_load(&volume);
+}
+
 static void host_request_redraw(void) {
     force_redraw = true;
 }
@@ -60,6 +96,15 @@ static KoniHostContext g_host_ctx = {
     .get_current_codec = host_get_current_codec,
     .get_current_decoder = host_get_current_decoder,
     .query_codec_interface = host_query_codec_interface,
+    .get_current_frame = host_get_current_frame,
+    .get_current_sec = host_get_current_sec,
+    .get_duration_sec = host_get_duration_sec,
+    .get_sample_rate = host_get_sample_rate,
+    .get_num_channels = host_get_num_channels,
+    .get_track_id = host_get_track_id,
+    .get_current_metadata = host_get_current_metadata,
+    .get_play_state = host_get_play_state,
+    .get_volume = host_get_volume,
     .request_redraw = host_request_redraw,
     .set_status_message = host_set_status_message
 };

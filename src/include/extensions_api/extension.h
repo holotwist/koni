@@ -35,6 +35,17 @@ struct KoniHostContext {
     /* Codec interface query helper */
     void* (*query_codec_interface)(KoniInterfaceID iface_id);
 
+    /* Extended Playback & Track Status */
+    uint32_t (*get_current_frame)(void);
+    uint32_t (*get_current_sec)(void);
+    uint32_t (*get_duration_sec)(void);
+    uint32_t (*get_sample_rate)(void);
+    uint16_t (*get_num_channels)(void);
+    int (*get_track_id)(void);
+    const KoniMetadata* (*get_current_metadata)(void);
+    int (*get_play_state)(void); /* 0=STOPPED, 1=PLAYING, 2=PAUSED */
+    int (*get_volume)(void);
+
     /* UI Services */
     void (*request_redraw)(void);
     void (*set_status_message)(const char *fmt, ...);

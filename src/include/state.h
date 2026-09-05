@@ -157,6 +157,8 @@ extern float       vis_ring_r[VIS_BUF_SIZE];
 extern atomic_uint vis_wpos;
 extern atomic_uint vis_srate;
 extern atomic_uint p_frames_consumed;
+extern atomic_ullong p_hw_frames_played;
+extern atomic_ullong p_track_hw_start;
 
 bool player_advance_track(PlayerCommand cmd);
 bool player_peek_next_track(char *out_path, size_t path_sz, char *out_name, size_t name_sz, int *out_idx);

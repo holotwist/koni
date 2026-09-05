@@ -164,6 +164,12 @@ static bool tracker_handle_key(KoniExtension *ext, int ch, KoniHostContext *host
     return false;
 }
 
+static void tracker_on_track_loaded(KoniExtension *ext, const char *filepath, const KoniCodecImpl *codec, KoniDecoder *dec) {
+    (void)ext; (void)filepath; (void)codec; (void)dec;
+    s_channel_offset = 0;
+    force_redraw = true;
+}
+
 KoniExtension tracker_extension = {
     .id = "koni.tracker",
     .name = "PxTone Tracker View",
@@ -179,7 +185,7 @@ KoniExtension tracker_extension = {
     .handle_key = tracker_handle_key,
     .init = NULL,
     .shutdown = NULL,
-    .on_track_loaded = NULL,
+    .on_track_loaded = tracker_on_track_loaded,
     .on_track_stopped = NULL,
     .on_tick = NULL,
     .call = NULL

@@ -39,7 +39,13 @@ static void data_callback(ma_device* pDevice, void* pOutput, const void* pInput,
     if (framesReadTotal < frameCount) {
         memset(pOut, 0, (frameCount - framesReadTotal) * bpf);
     }
-    atomic_fetch_add(&p_frames_consumed, framesReadTotal);
+
+    if (framesReadTotal > 0) {
+        unsigned long long hw = atomic_fetch_add(&p_hw_frames_played, framesReadTotal) + framesReadTotal;
+        unsigned long long start = atomic_load(&p_track_hw_start);
+        unsigned long long track_frames = (hw >= start) ? (hw - start) : 0;
+        atomic_store(&p_frames_consumed, (uint32_t)track_frames);
+    }
 }
 
 typedef struct {
@@ -51,7 +57,10 @@ typedef struct {
     KoniAudioFormat fmt;
     KoniMetadata meta;
     RGainState rgain_state;
-    uint64_t samples_played;
+    uint64_t frames_decoded;
+    unsigned long long hw_start_frame;
+    unsigned long long hw_end_frame;
+    bool reached_eof;
     bool is_open;
 } AudioStream;
 
@@ -100,7 +109,10 @@ static bool audio_stream_open(AudioStream *stream, const char *path, const char 
     stream->dec = dec;
     stream->fmt = fmt;
     stream->meta = meta;
-    stream->samples_played = 0;
+    stream->frames_decoded = 0;
+    stream->hw_start_frame = 0;
+    stream->hw_end_frame = 0;
+    stream->reached_eof = false;
     rgain_init(&stream->rgain_state, fmt.sample_rate, fmt.num_channels);
     rgain_set_meta(&stream->rgain_state, meta.has_track_gain, meta.track_gain);
     stream->is_open = true;
@@ -132,9 +144,9 @@ static void apply_stream_to_global_state(const AudioStream *stream) {
     atomic_store(&p_total_sec, (stream->fmt.sample_rate > 0) ? (stream->fmt.total_samples / stream->fmt.sample_rate) : 0);
     atomic_store(&vis_srate, stream->fmt.sample_rate);
     atomic_store(&p_current_sec, 0);
-    atomic_store(&p_frames_consumed, 0);
     atomic_store(&header_ready_for_idx, stream->file_idx);
     atomic_fetch_add(&current_track_id, 1);
+    force_redraw = true;
 }
 
 void *audio_thread_func(void *arg) {
@@ -190,19 +202,27 @@ void *audio_thread_func(void *arg) {
                 continue;
             }
 
-            apply_stream_to_global_state(&cur_stream);
-            atomic_store(&current_cmd_atomic, CMD_NONE);
-            atomic_store(&play_state_atomic, STATE_PLAYING);
-
-            atomic_store(&vis_wpos, 0);
-            atomic_store(&p_frames_consumed, 0);
-            memset(vis_ring_l, 0, sizeof(vis_ring_l));
-            memset(vis_ring_r, 0, sizeof(vis_ring_r));
-
             if (device_initialized) {
                 ma_device_stop(&device);
                 ma_pcm_rb_reset(&ring_buffer);
             }
+
+            unsigned long long hw_now = atomic_load(&p_hw_frames_played);
+            cur_stream.hw_start_frame = hw_now;
+            cur_stream.hw_end_frame = 0;
+            cur_stream.reached_eof = false;
+            cur_stream.frames_decoded = 0;
+
+            atomic_store(&p_track_hw_start, hw_now);
+            atomic_store(&p_frames_consumed, 0);
+            apply_stream_to_global_state(&cur_stream);
+
+            atomic_store(&current_cmd_atomic, CMD_NONE);
+            atomic_store(&play_state_atomic, STATE_PLAYING);
+
+            atomic_store(&vis_wpos, 0);
+            memset(vis_ring_l, 0, sizeof(vis_ring_l));
+            memset(vis_ring_r, 0, sizeof(vis_ring_r));
         }
 
         PlayState state = atomic_load(&play_state_atomic);
@@ -280,18 +300,24 @@ void *audio_thread_func(void *arg) {
                 if (target_ms >= 0 && cur_stream.codec && cur_stream.dec) {
                     uint64_t target_sample = ((uint64_t)target_ms * cur_stream.fmt.sample_rate) / 1000ULL;
                     if (cur_stream.codec->seek(cur_stream.dec, target_sample)) {
-                        cur_stream.samples_played = target_sample;
-                        atomic_store(&p_current_sec, cur_stream.samples_played / cur_stream.fmt.sample_rate);
-                        atomic_store(&p_frames_consumed, target_sample);
-                        
+                        cur_stream.frames_decoded = target_sample;
+                        cur_stream.reached_eof = false;
+                        cur_stream.hw_end_frame = 0;
+
                         ma_device_stop(&device);
                         ma_pcm_rb_reset(&ring_buffer);
+
+                        unsigned long long hw_now = atomic_load(&p_hw_frames_played);
+                        cur_stream.hw_start_frame = (hw_now >= target_sample) ? (hw_now - target_sample) : 0;
+                        atomic_store(&p_track_hw_start, cur_stream.hw_start_frame);
+                        atomic_store(&p_frames_consumed, (uint32_t)target_sample);
+                        atomic_store(&p_current_sec, (uint32_t)(target_sample / cur_stream.fmt.sample_rate));
+
                         memset(vis_ring_l, 0, sizeof(vis_ring_l));
                         memset(vis_ring_r, 0, sizeof(vis_ring_r));
                         ma_device_start(&device);
                         device_active = true;
 
-                        // Close preloaded next stream if we seeked away
                         audio_stream_close(&next_stream);
                     }
                 }
@@ -307,9 +333,27 @@ void *audio_thread_func(void *arg) {
                 device_active = true;
             }
 
-            // Preload next track if within 3 seconds of track completion
-            uint64_t remaining_samples = (cur_stream.fmt.total_samples > cur_stream.samples_played) ? 
-                                         (cur_stream.fmt.total_samples - cur_stream.samples_played) : 0;
+            // Check if audio hardware reached the boundary between tracks
+            if (cur_stream.reached_eof && next_stream.is_open && next_stream.hw_start_frame > 0) {
+                unsigned long long hw_played = atomic_load(&p_hw_frames_played);
+                if (hw_played >= next_stream.hw_start_frame) {
+                    // Track 1 has completely finished at the speakers
+                    // Track 2 starts sounding right now
+                    atomic_store(&p_track_hw_start, next_stream.hw_start_frame);
+                    unsigned long long consumed = hw_played - next_stream.hw_start_frame;
+                    atomic_store(&p_frames_consumed, (uint32_t)consumed);
+
+                    player_advance_track(CMD_NEXT_AUTO);
+                    audio_stream_close(&cur_stream);
+                    cur_stream = next_stream;
+                    memset(&next_stream, 0, sizeof(AudioStream));
+                    apply_stream_to_global_state(&cur_stream);
+                }
+            }
+
+            // Preload next track within 3 seconds of track completion
+            uint64_t remaining_samples = (cur_stream.fmt.total_samples > cur_stream.frames_decoded) ? 
+                                         (cur_stream.fmt.total_samples - cur_stream.frames_decoded) : 0;
             if (!next_stream.is_open && remaining_samples > 0 && remaining_samples <= (uint64_t)cur_stream.fmt.sample_rate * 3ULL) {
                 char next_p[1024] = {0};
                 char next_n[256] = {0};
@@ -320,39 +364,54 @@ void *audio_thread_func(void *arg) {
             }
 
             uint32_t chunk_request = 16384;
-            uint32_t mix_samples = cur_stream.codec->decode(cur_stream.dec, interleaved, chunk_request);
+            uint32_t mix_samples = 0;
 
-            if (mix_samples > 0) {
-                rgain_set_mode(&cur_stream.rgain_state, (RGainMode)atomic_load(&play_mode_rgain));
-                rgain_process(&cur_stream.rgain_state, interleaved, mix_samples);
+            if (!cur_stream.reached_eof) {
+                mix_samples = cur_stream.codec->decode(cur_stream.dec, interleaved, chunk_request);
+                cur_stream.frames_decoded += mix_samples;
+                if (mix_samples > 0) {
+                    rgain_set_mode(&cur_stream.rgain_state, (RGainMode)atomic_load(&play_mode_rgain));
+                    rgain_process(&cur_stream.rgain_state, interleaved, mix_samples);
+                }
+                if (mix_samples < chunk_request) {
+                    cur_stream.reached_eof = true;
+                    cur_stream.hw_end_frame = cur_stream.hw_start_frame + cur_stream.frames_decoded;
+                }
             }
 
-            // Seamlessly fill the rest of the block from preloaded track
-            if (mix_samples < chunk_request && next_stream.is_open && 
-                next_stream.fmt.sample_rate == cur_stream.fmt.sample_rate && 
+            // Seamless gapless concatenation if next track is ready and formats match
+            if (cur_stream.reached_eof && next_stream.is_open &&
+                next_stream.fmt.sample_rate == cur_stream.fmt.sample_rate &&
                 next_stream.fmt.num_channels == cur_stream.fmt.num_channels) {
 
                 uint32_t needed = chunk_request - mix_samples;
-                int32_t *gapless_buf = interleaved + (mix_samples * cur_stream.fmt.num_channels);
-                uint32_t next_mix = next_stream.codec->decode(next_stream.dec, gapless_buf, needed);
-
-                if (next_mix > 0) {
-                    rgain_set_mode(&next_stream.rgain_state, (RGainMode)atomic_load(&play_mode_rgain));
-                    rgain_process(&next_stream.rgain_state, gapless_buf, next_mix);
-                    next_stream.samples_played += next_mix;
+                if (needed > 0 && !next_stream.reached_eof) {
+                    int32_t *gapless_buf = interleaved + (mix_samples * cur_stream.fmt.num_channels);
+                    uint32_t next_mix = next_stream.codec->decode(next_stream.dec, gapless_buf, needed);
+                    if (next_mix > 0) {
+                        if (next_stream.hw_start_frame == 0) {
+                            next_stream.hw_start_frame = cur_stream.hw_end_frame;
+                        }
+                        rgain_set_mode(&next_stream.rgain_state, (RGainMode)atomic_load(&play_mode_rgain));
+                        rgain_process(&next_stream.rgain_state, gapless_buf, next_mix);
+                        next_stream.frames_decoded += next_mix;
+                        mix_samples += next_mix;
+                    } else {
+                        next_stream.reached_eof = true;
+                    }
                 }
-
-                // Advance player state without interrupting audio playback
-                player_advance_track(CMD_NEXT_AUTO);
-                audio_stream_close(&cur_stream);
-                cur_stream = next_stream;
-                memset(&next_stream, 0, sizeof(AudioStream));
-                apply_stream_to_global_state(&cur_stream);
-                mix_samples += next_mix;
             }
 
             if (mix_samples == 0) {
-                break; // Track reached end
+                // If EOF reached, wait for remaining buffer to drain to the speakers
+                if (cur_stream.reached_eof) {
+                    unsigned long long hw = atomic_load(&p_hw_frames_played);
+                    if (hw < cur_stream.hw_end_frame) {
+                        nanosleep(&sleep_ts, NULL);
+                        continue;
+                    }
+                }
+                break; // Track reached real end of playback
             }
 
             // Apply cubic volume scaling
@@ -414,8 +473,8 @@ void *audio_thread_func(void *arg) {
                 }
             }
 
-            cur_stream.samples_played += mix_samples;
-            atomic_store(&p_current_sec, cur_stream.samples_played / cur_stream.fmt.sample_rate);
+            uint32_t consumed = atomic_load(&p_frames_consumed);
+            atomic_store(&p_current_sec, (cur_stream.fmt.sample_rate > 0) ? (consumed / cur_stream.fmt.sample_rate) : 0);
         }
 
         free(interleaved);

@@ -190,7 +190,11 @@ static uint32_t pxtn_iface_get_current_row(KoniDecoder *dec) {
     uint32_t played_frames = atomic_load(&p_frames_consumed);
     uint32_t cur_clock = (uint32_t)((double)played_frames / (double)dec->pxtn->clock_rate);
     uint32_t step = dec->step_clocks > 0 ? dec->step_clocks : pxtn_get_row_step_clocks(dec->pxtn);
-    return step > 0 ? (cur_clock / step) : 0;
+    uint32_t row = step > 0 ? (cur_clock / step) : 0;
+    if (dec->grid_rows > 0 && row >= dec->grid_rows) {
+        row = dec->grid_rows - 1;
+    }
+    return row;
 }
 
 static uint32_t pxtn_iface_get_total_rows(KoniDecoder *dec) {
