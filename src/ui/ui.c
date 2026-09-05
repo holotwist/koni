@@ -129,6 +129,24 @@ static int get_help_bar_lines(int max_x) {
     return lines;
 }
 
+static int ui_calculate_refresh_interval_ms(void) {
+    // If stopped or paused, audio is static, no need for high frame rates
+    PlayState state = (PlayState)atomic_load(&play_state_atomic);
+    if (state != STATE_PLAYING) {
+        return 250; // 4 FPS idle
+    }
+
+    // When playing, check if visualizer is being rendered
+    bool vis_active = show_visualizer && (active_tab == 1);
+    if (!vis_active) {
+        // Lyrics, Tracker, or browser with visualizer toggled off ('v')
+        return 100; // 10 FPS is optimal for marquee scrolling and time updates
+    }
+
+    // Active visualizer rendering, 40 FPS
+    return 25;
+}
+
 static void ui_loop(void) {
     if (force_redraw) {
         erase();
@@ -307,7 +325,15 @@ void ui_run(bool force_colors) {
     srand(time(NULL));
 
     bool running = true;
+    int current_timeout = 25;
+
     while (running) {
+        int desired_timeout = ui_calculate_refresh_interval_ms();
+        if (desired_timeout != current_timeout) {
+            current_timeout = desired_timeout;
+            timeout(current_timeout);
+        }
+
         ui_loop();
 
         int ch = getch();
