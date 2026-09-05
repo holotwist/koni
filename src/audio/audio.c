@@ -58,7 +58,7 @@ typedef struct {
 static void audio_stream_close(AudioStream *stream) {
     if (!stream || !stream->is_open) return;
 
-    // Disconnect active references under mutex BEFORE freeing decoder memory
+    // Disconnect active references under mutex before freeing decoder memory
     pthread_mutex_lock(&state_mutex);
     if (active_decoder == stream->dec) {
         active_codec = NULL;

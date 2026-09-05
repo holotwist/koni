@@ -5,30 +5,44 @@
 #include <string.h>
 
 void reset_unit_tones_export(PxtnTiny *p, PxUnit *u, const PxVoice *v, float clock_rate) {
-    for (int i = 0; i < v->num_units; i++) {
-        const PxVoiceUnit *vu = &v->units[i];
-        float tun = (vu->tuning != 0.0f) ? vu->tuning : 1.0f;
-        float ofs_freq;
-        if (vu->beat_fit && p->info.beat_tempo > 0.0f) {
-            ofs_freq = ((float)vu->smp_body_w * p->info.beat_tempo) / (44100.0f * 60.0f * tun);
-        } else {
-            ofs_freq = pxtn_get_freq(0x4500 - vu->basic_key) * tun;
-        }
+    for (int i = 0; i < 2; i++) {
+        if (i < v->num_units) {
+            const PxVoiceUnit *vu = &v->units[i];
+            float tun = (vu->tuning != 0.0f) ? vu->tuning : 1.0f;
+            float ofs_freq;
+            if (vu->beat_fit && p->info.beat_tempo > 0.0f) {
+                ofs_freq = ((float)vu->smp_body_w * p->info.beat_tempo) / (44100.0f * 60.0f * tun);
+            } else {
+                ofs_freq = pxtn_get_freq(0x4500 - vu->basic_key) * tun;
+            }
 
-        u->tones[i].smp_pos = 0.0;
-        u->tones[i].offset_freq = ofs_freq;
-        u->tones[i].env_volume = vu->has_env ? 0 : 128;
-        u->tones[i].life_count = 0;
-        u->tones[i].on_count = 0;
-        u->tones[i].env_start = vu->has_env ? 0 : 128;
-        u->tones[i].env_pos = 0;
-        u->tones[i].env_release_clock = clock_rate > 0 ? (int32_t)(vu->env_release / clock_rate) : 0;
+            u->tones[i].smp_pos = 0.0;
+            u->tones[i].offset_freq = ofs_freq;
+            u->tones[i].env_volume = (vu->env_size > 0) ? 0 : 128;
+            u->tones[i].life_count = 0;
+            u->tones[i].on_count = 0;
+            u->tones[i].env_start = (vu->env_size > 0) ? 0 : 128;
+            u->tones[i].env_pos = 0;
+            u->tones[i].env_release_clock = (clock_rate > 0 && vu->env_release > 0) ? (int32_t)(vu->env_release / clock_rate) : 0;
+        } else {
+            memset(&u->tones[i], 0, sizeof(PxVoiceTone));
+        }
     }
 }
 
 static void process_event(PxtnTiny *p, const PxEvent *e) {
     if (e->unit_no >= MAX_UNITS) return;
     if (e->unit_no >= p->unit_count) {
+        for (int nu = p->unit_count; nu <= e->unit_no; nu++) {
+            p->units[nu].velocity = 104;
+            p->units[nu].volume = 104;
+            p->units[nu].tuning = 1.0f;
+            p->units[nu].key_now = 0x6000;
+            p->units[nu].key_start = 0x6000;
+            p->units[nu].pan_vols[0] = 64;
+            p->units[nu].pan_vols[1] = 64;
+            p->units[nu].voice_idx = 0;
+        }
         p->unit_count = e->unit_no + 1;
     }
     PxUnit *u = &p->units[e->unit_no];
@@ -52,7 +66,7 @@ static void process_event(PxtnTiny *p, const PxEvent *e) {
                 PxVoiceTone *vt = &u->tones[vi];
                 const PxVoiceUnit *vu = &v->units[vi];
 
-                if (vu->has_env && vu->env_release > 0) {
+                if (vu->env_release > 0) {
                     int32_t max_life1 = on_count + vu->env_release;
                     int32_t max_life2 = max_life1;
 
@@ -61,8 +75,10 @@ static void process_event(PxtnTiny *p, const PxEvent *e) {
                     for (int n = p->cur_event_idx + 1; n < p->event_count; n++) {
                         if (p->events[n].clock > next_clock) break;
                         if (p->events[n].unit_no == e->unit_no && p->events[n].kind == PX_EVENT_ON) {
-                            max_life2 = (int32_t)((p->events[n].clock - e->clock) * p->clock_rate);
-                            break;
+                            if (p->events[n].clock > e->clock) {
+                                max_life2 = (int32_t)((p->events[n].clock - e->clock) * p->clock_rate);
+                                break;
+                            }
                         }
                     }
                     vt->life_count = (max_life1 < max_life2) ? max_life1 : max_life2;
@@ -74,7 +90,7 @@ static void process_event(PxtnTiny *p, const PxEvent *e) {
                     vt->on_count = on_count;
                     vt->smp_pos = 0.0;
                     vt->env_pos = 0;
-                    if (vu->has_env) {
+                    if (vu->env_size > 0) {
                         vt->env_volume = 0;
                         vt->env_start = 0;
                     } else {
@@ -129,6 +145,10 @@ static void process_event(PxtnTiny *p, const PxEvent *e) {
                     u->key_now = 0x6000;
                     u->key_start = 0x6000;
                     u->key_margin = 0;
+                } else {
+                    u->key_now = u->key_start + u->key_margin;
+                    u->key_start = u->key_now;
+                    u->key_margin = 0;
                 }
                 reset_unit_tones_export(p, u, &p->voices[u->voice_idx], p->clock_rate);
             }
@@ -165,21 +185,21 @@ uint32_t pxtn_synth_render(PxtnTiny *p, int32_t *out_pcm, uint32_t max_frames) {
                 const PxVoiceUnit *vu = &v->units[vi];
                 PxVoiceTone *vt = &p->units[u].tones[vi];
                 if (vt->life_count > 0) {
-                    if (vu->has_env) {
-                        if (vt->on_count > 0) {
-                            if (vu->p_env && vt->env_pos < vu->env_size) {
+                    if (vt->on_count > 0) {
+                        if (vu->env_size > 0 && vu->p_env) {
+                            if (vt->env_pos < vu->env_size) {
                                 vt->env_volume = vu->p_env[vt->env_pos++];
                             }
-                        } else if (vu->env_release > 0) {
-                            int32_t ev = vt->env_start - (vt->env_start * vt->env_pos / vu->env_release);
-                            if (ev < 0) ev = 0;
-                            vt->env_volume = ev;
-                            vt->env_pos++;
                         } else {
-                            vt->life_count = 0;
+                            vt->env_volume = 128;
                         }
+                    } else if (vu->env_release > 0) {
+                        int32_t ev = vt->env_start - (vt->env_start * vt->env_pos / vu->env_release);
+                        if (ev < 0) ev = 0;
+                        vt->env_volume = ev;
+                        vt->env_pos++;
                     } else {
-                        vt->env_volume = 128;
+                        vt->life_count = 0;
                     }
                 }
             }
@@ -204,7 +224,7 @@ uint32_t pxtn_synth_render(PxtnTiny *p, int32_t *out_pcm, uint32_t max_frames) {
                             work = (work * un->velocity) / 128;
                             work = (work * un->volume) / 128;
                             work = (work * un->pan_vols[ch]) / 64;
-                            if (vu->has_env) {
+                            if (vu->env_size > 0 || vu->env_release > 0) {
                                 work = (work * vt->env_volume) / 128;
                             }
                             if (vu->smooth && vt->life_count < p->smp_smooth && p->smp_smooth > 0) {
@@ -287,7 +307,7 @@ uint32_t pxtn_synth_render(PxtnTiny *p, int32_t *out_pcm, uint32_t max_frames) {
                     vt->life_count--;
                     if (vt->on_count > 0) {
                         vt->on_count--;
-                        if (vt->on_count == 0 && vu->has_env) {
+                        if (vt->on_count == 0 && (vu->env_size > 0 || vu->env_release > 0)) {
                             vt->env_start = vt->env_volume;
                             vt->env_pos = 0;
                         }

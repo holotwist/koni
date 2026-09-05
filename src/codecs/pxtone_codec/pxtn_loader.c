@@ -3,6 +3,10 @@
 #include "pxtn_tables.h"
 #include "pxtn_noise.h"
 #include "miniaudio.h"
+
+#define STB_VORBIS_HEADER_ONLY
+#include "stb_vorbis.c"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,20 +36,43 @@ static bool mr_seek(MemReader *mr, long offset, int whence) {
 }
 
 static bool mr_read_var(MemReader *mr, int32_t *out) {
-    uint8_t a[5];
+    uint8_t a[5] = {0};
+    uint8_t b[5] = {0};
     int count = 0;
     for (count = 0; count < 5; count++) {
         if (!mr_read(mr, &a[count], 1)) return false;
         if (!(a[count] & 0x80)) break;
     }
     switch (count) {
-        case 0: *out = a[0]; break;
-        case 1: *out = (a[0] & 0x7F) | (a[1] << 7); break;
-        case 2: *out = (a[0] & 0x7F) | ((a[1] & 0x7F) << 7) | (a[2] << 14); break;
-        case 3: *out = (a[0] & 0x7F) | ((a[1] & 0x7F) << 7) | ((a[2] & 0x7F) << 14) | (a[3] << 21); break;
-        case 4: *out = (a[0] & 0x7F) | ((a[1] & 0x7F) << 7) | ((a[2] & 0x7F) << 14) | ((a[3] & 0x7F) << 21) | (a[4] << 28); break;
-        default: return false;
+        case 0:
+            b[0] = (a[0] & 0x7F);
+            break;
+        case 1:
+            b[0] = ((a[0] & 0x7F) >> 0) | (a[1] << 7);
+            b[1] = (a[1] & 0x7F) >> 1;
+            break;
+        case 2:
+            b[0] = ((a[0] & 0x7F) >> 0) | (a[1] << 7);
+            b[1] = ((a[1] & 0x7F) >> 1) | (a[2] << 6);
+            b[2] = (a[2] & 0x7F) >> 2;
+            break;
+        case 3:
+            b[0] = ((a[0] & 0x7F) >> 0) | (a[1] << 7);
+            b[1] = ((a[1] & 0x7F) >> 1) | (a[2] << 6);
+            b[2] = ((a[2] & 0x7F) >> 2) | (a[3] << 5);
+            b[3] = (a[3] & 0x7F) >> 3;
+            break;
+        case 4:
+            b[0] = ((a[0] & 0x7F) >> 0) | (a[1] << 7);
+            b[1] = ((a[1] & 0x7F) >> 1) | (a[2] << 6);
+            b[2] = ((a[2] & 0x7F) >> 2) | (a[3] << 5);
+            b[3] = ((a[3] & 0x7F) >> 3) | (a[4] << 4);
+            b[4] = (a[4] & 0x7F) >> 4;
+            break;
+        default:
+            return false;
     }
+    memcpy(out, b, sizeof(int32_t));
     return true;
 }
 
@@ -92,41 +119,36 @@ static void convert_pcm(PxVoiceUnit *vu, const uint8_t *src_pcm, uint32_t ch, ui
 }
 
 static void decode_ogg(const uint8_t *ogg_data, size_t size, PxVoiceUnit *vu, uint32_t target_sps) {
-    ma_decoder_config config = ma_decoder_config_init(ma_format_s16, 2, target_sps);
-    ma_decoder dec;
-    if (ma_decoder_init_memory(ogg_data, size, &config, &dec) != MA_SUCCESS) return;
-
-    ma_uint64 total_frames = 0;
-    ma_decoder_get_length_in_pcm_frames(&dec, &total_frames);
-    if (total_frames > 0 && total_frames < 44100 * 60 * 10) {
-        vu->p_smp_w = malloc((size_t)total_frames * 4);
-        if (vu->p_smp_w) {
-            ma_uint64 read_frames = 0;
-            ma_decoder_read_pcm_frames(&dec, vu->p_smp_w, total_frames, &read_frames);
-            vu->smp_body_w = (int32_t)read_frames;
-        }
-    } else {
-        size_t cap = 16384;
-        size_t total_read = 0;
-        int16_t *buf = malloc(cap * 4);
-        if (buf) {
-            while (1) {
-                ma_uint64 frames_read = 0;
-                ma_result res = ma_decoder_read_pcm_frames(&dec, buf + (total_read * 2), cap - total_read, &frames_read);
-                total_read += (size_t)frames_read;
-                if (res != MA_SUCCESS || frames_read == 0) break;
-                if (total_read >= cap) {
-                    cap *= 2;
-                    int16_t *nb = realloc(buf, cap * 4);
-                    if (!nb) break;
-                    buf = nb;
-                }
-            }
-            vu->p_smp_w = buf;
-            vu->smp_body_w = (int32_t)total_read;
-        }
+    if (!ogg_data || size == 0) return;
+    int ch = 0, sample_rate = 0;
+    short *output = NULL;
+    int samples_per_channel = stb_vorbis_decode_memory(ogg_data, (int)size, &ch, &sample_rate, &output);
+    if (samples_per_channel <= 0 || !output || sample_rate <= 0 || ch <= 0) {
+        if (output) free(output);
+        return;
     }
-    ma_decoder_uninit(&dec);
+
+    uint32_t dst_frames = (uint32_t)((uint64_t)samples_per_channel * target_sps / (uint32_t)sample_rate);
+    if (dst_frames == 0) dst_frames = 1;
+
+    vu->p_smp_w = malloc(dst_frames * 4);
+    if (!vu->p_smp_w) {
+        free(output);
+        return;
+    }
+    vu->smp_body_w = (int32_t)dst_frames;
+
+    for (uint32_t d = 0; d < dst_frames; d++) {
+        uint32_t s_idx = (uint32_t)((uint64_t)d * (uint32_t)sample_rate / target_sps);
+        if (s_idx >= (uint32_t)samples_per_channel) s_idx = (uint32_t)samples_per_channel - 1;
+
+        int16_t l = output[s_idx * ch];
+        int16_t r = (ch > 1) ? output[s_idx * ch + 1] : l;
+
+        vu->p_smp_w[d * 2]     = l;
+        vu->p_smp_w[d * 2 + 1] = r;
+    }
+    free(output);
 }
 
 static void synth_ptv_wave(PxVoiceUnit *vu, int wave_type, PxPoint *pts, int pt_num, int reso, int volume, int pan) {
@@ -228,9 +250,7 @@ static void build_envelope(PxVoiceUnit *vu, PxPoint *pts, int head_num, int tail
     if (tail_num > 0 && pts) {
         vu->env_release = (int32_t)((double)pts[head_num].x * sps / fps);
     }
-    if (head_num > 0 || tail_num > 0) {
-        vu->has_env = true;
-    }
+    vu->has_env = (head_num > 0 && vu->env_size > 0 && vu->p_env != NULL);
 }
 
 PxtnTiny* pxtn_load_file(const char *filepath, uint32_t target_sps) {
@@ -261,9 +281,12 @@ PxtnTiny* pxtn_load_file(const char *filepath, uint32_t target_sps) {
         return NULL;
     }
 
-    uint16_t exe_ver = 0, dummy = 0;
-    mr_read(&mr, &exe_ver, 2);
-    mr_read(&mr, &dummy, 2);
+    bool has_exe_ver = (memcmp(header, "PTCOLLAGE-05", 12) != 0 && memcmp(header, "PTTUNE--2005", 12) != 0);
+    if (has_exe_ver) {
+        uint16_t exe_ver = 0, dummy = 0;
+        mr_read(&mr, &exe_ver, 2);
+        mr_read(&mr, &dummy, 2);
+    }
 
     PxtnTiny *p = calloc(1, sizeof(PxtnTiny));
     if (!p) { free(file_data); return NULL; }
@@ -384,14 +407,28 @@ PxtnTiny* pxtn_load_file(const char *filepath, uint32_t target_sps) {
             mr_read(&mr, &num, 2);
             mr_read(&mr, &rrr, 2);
             p->unit_count = (num <= MAX_UNITS) ? num : MAX_UNITS;
-            for (int u = 0; u < p->unit_count; u++) {
+            for (int u = 0; u < MAX_UNITS; u++) {
                 p->units[u].velocity = 104;
                 p->units[u].volume = 104;
                 p->units[u].tuning = 1.0f;
                 p->units[u].key_now = 0x6000;
                 p->units[u].key_start = 0x6000;
+                p->units[u].key_margin = 0;
+                p->units[u].portamento_pos = 0;
                 p->units[u].pan_vols[0] = 64;
                 p->units[u].pan_vols[1] = 64;
+                p->units[u].voice_idx = 0;
+            }
+        } else if (memcmp(tag, "pxtnUNIT", 8) == 0) {
+            int32_t sz = 0;
+            uint16_t utype = 0, ugroup = 0;
+            mr_read(&mr, &sz, 4);
+            mr_read(&mr, &utype, 2);
+            mr_read(&mr, &ugroup, 2);
+            if (p->unit_count < MAX_UNITS) {
+                int u = p->unit_count++;
+                p->units[u].group_no = (ugroup < MAX_GROUPS) ? ugroup : 0;
+                p->units[u].voice_idx = (u < p->voice_count) ? u : 0;
             }
         } else if (memcmp(tag, "matePCM ", 8) == 0) {
             uint32_t sz = 0;
@@ -664,7 +701,7 @@ PxtnTiny* pxtn_load_file(const char *filepath, uint32_t target_sps) {
                 PxOverDrive *od = &p->ovdrvs[p->ovdrv_count++];
                 od->group = grp < MAX_GROUPS ? grp : 0;
                 od->cut_f = cut;
-                od->amp_f = amp;
+                od->amp_f = (amp > 0.0f) ? amp : 1.0f;
                 od->cut_top = (int32_t)(32767.0f * (100.0f - cut) / 100.0f);
             }
         } else if (memcmp(tag, "textNAME", 8) == 0) {
@@ -722,7 +759,7 @@ PxtnTiny* pxtn_load_file(const char *filepath, uint32_t target_sps) {
         }
     }
 
-    for (int u = 0; u < p->unit_count; u++) {
+    for (int u = 0; u < MAX_UNITS; u++) {
         p->units[u].velocity = 104;
         p->units[u].volume = 104;
         p->units[u].tuning = 1.0f;
@@ -734,7 +771,7 @@ PxtnTiny* pxtn_load_file(const char *filepath, uint32_t target_sps) {
         p->units[u].pan_vols[1] = 64;
         int v_idx = (u < p->voice_count) ? u : 0;
         p->units[u].voice_idx = v_idx;
-        if (v_idx < p->voice_count) {
+        if (p->voice_count > 0 && v_idx < p->voice_count) {
             extern void reset_unit_tones_export(PxtnTiny *p, PxUnit *u, const PxVoice *v, float clock_rate);
             reset_unit_tones_export(p, &p->units[u], &p->voices[v_idx], p->clock_rate);
         }

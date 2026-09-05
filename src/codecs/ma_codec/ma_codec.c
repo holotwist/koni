@@ -3,7 +3,7 @@
 #include <string.h>
 #include "miniaudio.h"
 
-static const char* exts[] = { ".mp3", ".wav", ".flac", ".ogg", ".oga", NULL };
+static const char* exts[] = { ".mp3", ".wav", ".flac", NULL };
 
 struct KoniDecoder {
     ma_decoder decoder;

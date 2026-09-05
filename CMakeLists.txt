@@ -71,6 +71,8 @@ add_executable(koni
     src/codecs/pxtone_codec/pxtn_loader.c
     src/codecs/pxtone_codec/pxtn_synth.c
     src/codecs/pxtone_codec/pxtone_codec.c
+    src/codecs/ogg_codec/ogg_codec.c
+    src/codecs/ogg_codec/metadata.c
     src/codecs/ma_codec/ma_codec.c
     src/codecs/ma_codec/metadata.c
     src/ui/ui_common.c

@@ -332,109 +332,6 @@ static void parse_flac(FILE* fp, KoniMetadata* meta) {
     }
 }
 
-static void parse_ogg(FILE* fp, KoniMetadata* meta) {
-    fseek(fp, 0, SEEK_SET);
-
-    uint32_t target_serial = 0;
-    bool has_target_serial = false;
-    int pages_scanned = 0;
-    uint8_t* pkt_buf = NULL;
-    size_t pkt_len = 0;
-    size_t pkt_cap = 0;
-    bool comments_parsed = false;
-
-    while (pages_scanned < 200 && !comments_parsed) {
-        uint8_t page_hdr[27];
-        if (fread(page_hdr, 1, 27, fp) != 27) break;
-        if (memcmp(page_hdr, "OggS", 4) != 0) break;
-
-        pages_scanned++;
-        uint8_t header_type = page_hdr[5];
-        uint32_t serial_no = read_u32_le(page_hdr + 14);
-        uint8_t num_segments = page_hdr[26];
-
-        uint8_t seg_table[256];
-        if (fread(seg_table, 1, num_segments, fp) != num_segments) break;
-
-        size_t body_size = 0;
-        for (int i = 0; i < num_segments; i++) {
-            body_size += seg_table[i];
-        }
-
-        if (body_size > 0 && (!has_target_serial || serial_no == target_serial)) {
-            uint8_t* page_body = malloc(body_size);
-            if (!page_body) break;
-            if (fread(page_body, 1, body_size, fp) != body_size) {
-                free(page_body);
-                break;
-            }
-
-            size_t seg_offset = 0;
-            for (int i = 0; i < num_segments; i++) {
-                uint8_t seg_len = seg_table[i];
-                if (seg_len > 0) {
-                    if (pkt_len + seg_len > pkt_cap) {
-                        size_t new_cap = (pkt_cap == 0) ? 4096 : pkt_cap * 2;
-                        while (new_cap < pkt_len + seg_len) new_cap *= 2;
-                        uint8_t* new_buf = realloc(pkt_buf, new_cap);
-                        if (!new_buf) {
-                            break;
-                        }
-                        pkt_buf = new_buf;
-                        pkt_cap = new_cap;
-                    }
-                    memcpy(pkt_buf + pkt_len, page_body + seg_offset, seg_len);
-                    pkt_len += seg_len;
-                    seg_offset += seg_len;
-                }
-
-                if (seg_len < 255) {
-                    // Packet is complete
-                    if (!has_target_serial) {
-                        if ((pkt_len >= 7 && memcmp(pkt_buf, "\x01vorbis", 7) == 0) ||
-                            (pkt_len >= 8 && memcmp(pkt_buf, "OpusHead", 8) == 0) ||
-                            (pkt_len >= 5 && memcmp(pkt_buf, "\x7f" "FLAC", 5) == 0) ||
-                            (pkt_len >= 8 && memcmp(pkt_buf, "Speex   ", 8) == 0) ||
-                            (header_type & 0x02)) {
-                            target_serial = serial_no;
-                            has_target_serial = true;
-                        }
-                    }
-
-                    if (has_target_serial && serial_no == target_serial) {
-                        if (pkt_len >= 7 && memcmp(pkt_buf, "\x03vorbis", 7) == 0) {
-                            parse_vorbis_comments(pkt_buf + 7, pkt_len - 7, meta);
-                            comments_parsed = true;
-                        } else if (pkt_len >= 8 && memcmp(pkt_buf, "OpusTags", 8) == 0) {
-                            parse_vorbis_comments(pkt_buf + 8, pkt_len - 8, meta);
-                            comments_parsed = true;
-                        } else if (pkt_len >= 4 && (pkt_buf[0] & 0x7F) == 4) { // Ogg FLAC comment
-                            uint32_t bsize = (pkt_buf[1] << 16) | (pkt_buf[2] << 8) | pkt_buf[3];
-                            if (bsize + 4 <= pkt_len) {
-                                parse_vorbis_comments(pkt_buf + 4, bsize, meta);
-                                comments_parsed = true;
-                            }
-                        } else if (pkt_len >= 4 && (pkt_buf[0] & 0x7F) == 6) { // Ogg FLAC picture
-                            uint32_t bsize = (pkt_buf[1] << 16) | (pkt_buf[2] << 8) | pkt_buf[3];
-                            if (bsize + 4 <= pkt_len) {
-                                parse_flac_picture(pkt_buf + 4, bsize, meta);
-                            }
-                        }
-                    }
-
-                    pkt_len = 0;
-                    if (comments_parsed) break;
-                }
-            }
-            free(page_body);
-        } else if (body_size > 0) {
-            if (fseek(fp, (long)body_size, SEEK_CUR) != 0) break;
-        }
-    }
-
-    if (pkt_buf) free(pkt_buf);
-}
-
 bool ma_read_metadata(const char* filepath, KoniMetadata* meta, uint32_t* duration_sec) {
     memset(meta, 0, sizeof(KoniMetadata));
     if (duration_sec) *duration_sec = 0;
@@ -447,8 +344,6 @@ bool ma_read_metadata(const char* filepath, KoniMetadata* meta, uint32_t* durati
                 parse_id3v2(fp, magic, meta);
             } else if (memcmp(magic, "fLaC", 4) == 0) {
                 parse_flac(fp, meta);
-            } else if (memcmp(magic, "OggS", 4) == 0) {
-                parse_ogg(fp, meta);
             }
         }
         fclose(fp);

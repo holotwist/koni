@@ -69,7 +69,8 @@ void pxtn_synth_noise(PxVoiceUnit *vu, PxNoiseUnit *units, int unit_num, int smp
         setup_osc(&osc_volu, &nu->vol_osc, target_sps);
 
         int env_idx = 0;
-        double env_start = 0.0, env_margin = 0.0;
+        double env_start = (nu->env_num > 0) ? 0.0 : 1.0;
+        double env_margin = 0.0;
         int env_count = 0;
 
         while (env_idx < nu->env_num) {
