@@ -104,7 +104,14 @@ static void perform_seek_relative(int delta_ms) {
     if (srate == 0) srate = 44100;
 
     static int s_last_target_ms = -1;
+    static int s_last_track_id = -1;
     static struct timespec s_last_seek_time = {0};
+
+    int cur_track = atomic_load(&current_track_id);
+    if (s_last_track_id != cur_track) {
+        s_last_track_id = cur_track;
+        s_last_target_ms = -1;
+    }
 
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
@@ -560,6 +567,7 @@ bool ui_handle_input(int ch) {
                     base_playing_idx = -1;
                     history_len = 0; history_idx = -1;
                     pthread_mutex_unlock(&state_mutex);
+                    atomic_store(&seek_target_ms, -1);
                     atomic_store(&current_cmd_atomic, CMD_PLAY);
                 }
             } else if (current_browser_tab == TAB_QUEUE && num_playlist_files > 0) {
@@ -574,6 +582,7 @@ bool ui_handle_input(int ch) {
                 current_play_source = SOURCE_QUEUE;
                 history_len = 0; history_idx = -1;
                 pthread_mutex_unlock(&state_mutex);
+                atomic_store(&seek_target_ms, -1);
                 atomic_store(&current_cmd_atomic, CMD_PLAY);
             } else if (current_browser_tab == TAB_MUSIC && num_library_tracks > 0) {
                 pthread_mutex_lock(&state_mutex);
@@ -583,6 +592,7 @@ bool ui_handle_input(int ch) {
                 current_play_source = SOURCE_LIBRARY;
                 history_len = 0; history_idx = -1;
                 pthread_mutex_unlock(&state_mutex);
+                atomic_store(&seek_target_ms, -1);
                 atomic_store(&current_cmd_atomic, CMD_PLAY);
             } else if (current_browser_tab == TAB_PLAYLISTS) {
                 if (!playlist_in_drilldown) {
@@ -625,6 +635,7 @@ bool ui_handle_input(int ch) {
                         strncpy(playing_filename, lp.items[sel_idx].title[0] ? lp.items[sel_idx].title : lp.items[sel_idx].path, 255);
                         history_len = 0; history_idx = -1;
                         pthread_mutex_unlock(&state_mutex);
+                        atomic_store(&seek_target_ms, -1);
                         atomic_store(&current_cmd_atomic, CMD_PLAY);
                     }
                     playlist_mgmt_free_loaded(&lp);

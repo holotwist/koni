@@ -379,6 +379,7 @@ static void handle_playlist_action_select(int opt) {
             strncpy(playing_filename, lp.items[0].title[0] ? lp.items[0].title : lp.items[0].path, 255);
             history_len = 0; history_idx = -1;
             pthread_mutex_unlock(&state_mutex);
+            atomic_store(&seek_target_ms, -1);
             atomic_store(&current_cmd_atomic, CMD_PLAY);
             ui_status_set("Playing playlist: %s", s_target_playlist);
         }

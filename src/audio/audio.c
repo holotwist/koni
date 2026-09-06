@@ -191,6 +191,7 @@ void *audio_thread_func(void *arg) {
             atomic_store(&s_gapless_countdown, 0);
             atomic_store(&s_gapless_switched, false);
             gapless_active = false;
+            atomic_store(&seek_target_ms, -1);
 
             if (player_advance_track(cmd)) {
                 cmd = CMD_PLAY;
@@ -324,6 +325,7 @@ void *audio_thread_func(void *arg) {
 
             if (cmd == CMD_SEEK) {
                 int target_ms = atomic_load(&seek_target_ms);
+                atomic_store(&seek_target_ms, -1);
                 atomic_store(&current_cmd_atomic, CMD_NONE);
                 if (target_ms >= 0 && cur_stream.codec && cur_stream.dec) {
                     uint64_t target_sample = ((uint64_t)target_ms * cur_stream.fmt.sample_rate) / 1000ULL;
