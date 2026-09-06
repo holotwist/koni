@@ -508,7 +508,11 @@ bool ui_handle_input(int ch) {
                 }
             } else if (current_browser_tab == TAB_QUEUE && num_playlist_files > 0) {
                 pthread_mutex_lock(&state_mutex);
-                strncpy(playing_filepath, playlist[selected_playlist_idx].path, sizeof(playing_filepath));
+                if (current_play_source != SOURCE_QUEUE && current_play_source != SOURCE_NONE) {
+                    base_play_source = current_play_source;
+                    base_playing_idx = playing_file_idx;
+                }
+                strncpy(playing_filepath, playlist[selected_playlist_idx].path, sizeof(playing_filepath) - 1);
                 strncpy(playing_filename, playlist[selected_playlist_idx].name, 255);
                 playing_file_idx = selected_playlist_idx;
                 current_play_source = SOURCE_QUEUE;

@@ -19,9 +19,9 @@ typedef struct {
     KoniMetadata meta;
     KoniAudioFormat fmt;
     int idx;
+    int loaded_track_id;
     char filename[256];
     uint32_t smooth_rpos;
-    int header_loaded_for_idx;
     char filepath[1024];
     LyricDocument* lrc_doc;
 } UICache;

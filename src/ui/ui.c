@@ -22,7 +22,11 @@ static void ui_update_state(void) {
     ui_frame_counter++;
 
     pthread_mutex_lock(&state_mutex);
-    if (playing_file_idx != ui_cache.idx || strncmp(playing_filepath, ui_cache.filepath, sizeof(ui_cache.filepath)) != 0) {
+    int cur_track = atomic_load(&current_track_id);
+    bool track_changed = (ui_cache.loaded_track_id != cur_track && cur_track > 0) ||
+                         (strncmp(playing_filepath, ui_cache.filepath, sizeof(ui_cache.filepath)) != 0);
+
+    if (track_changed) {
         // Cursor follows song only in Music tab and only if cursor was already on the previous song
         if (current_browser_tab == TAB_MUSIC && library_tracks && num_library_tracks > 0) {
             bool cursor_was_on_song = false;
@@ -44,52 +48,36 @@ static void ui_update_state(void) {
 
         koni_metadata_free(&ui_cache.meta);
         memset(&ui_cache.meta, 0, sizeof(ui_cache.meta));
-        memset(&ui_cache.fmt, 0, sizeof(ui_cache.fmt));
-        ui_cache.filename[0] = '\0';
-
-        ui_cache.idx = playing_file_idx;
+        
+        if (p_metadata.title) ui_cache.meta.title = strdup(p_metadata.title);
+        if (p_metadata.artist) ui_cache.meta.artist = strdup(p_metadata.artist);
+        if (p_metadata.album) ui_cache.meta.album = strdup(p_metadata.album);
+        if (p_metadata.lyrics) ui_cache.meta.lyrics = strdup(p_metadata.lyrics);
+        
+        ui_cache.fmt = p_format;
+        strncpy(ui_cache.filename, playing_filename, 255);
         strncpy(ui_cache.filepath, playing_filepath, sizeof(ui_cache.filepath) - 1);
-        ui_cache.filepath[sizeof(ui_cache.filepath) - 1] = '\0';
-        ui_cache.header_loaded_for_idx = -2;
+        ui_cache.idx = playing_file_idx;
+        ui_cache.loaded_track_id = cur_track;
         ui_cache.smooth_rpos = 0;
+
         if (ui_cache.lrc_doc) {
             lyric_document_free(ui_cache.lrc_doc);
             ui_cache.lrc_doc = NULL;
         }
-        force_redraw = true;
-    }
 
-    if (ui_cache.header_loaded_for_idx != playing_file_idx) {
-        if (atomic_load(&header_ready_for_idx) == playing_file_idx) {
-            koni_metadata_free(&ui_cache.meta);
-            memset(&ui_cache.meta, 0, sizeof(ui_cache.meta));
-            
-            if (p_metadata.title) ui_cache.meta.title = strdup(p_metadata.title);
-            if (p_metadata.artist) ui_cache.meta.artist = strdup(p_metadata.artist);
-            if (p_metadata.album) ui_cache.meta.album = strdup(p_metadata.album);
-            if (p_metadata.lyrics) ui_cache.meta.lyrics = strdup(p_metadata.lyrics);
-            
-            if (ui_cache.lrc_doc) {
-                lyric_document_free(ui_cache.lrc_doc);
-                ui_cache.lrc_doc = NULL;
-            }
-            
-            strncpy(current_lyrics_backend, "Searching...", sizeof(current_lyrics_backend) - 1);
-            
-            bool pending_questions = !app_config.online_lyrics_asked || 
-                                    (app_config.online_lyrics && !app_config.download_online_lyrics_asked);
-                                    
-            if (!pending_questions) {
-                lyrics_engine_fetch_async(ui_cache.meta.title, ui_cache.meta.artist, ui_cache.meta.album,
-                                          atomic_load(&p_total_sec), ui_cache.filepath, ui_cache.meta.lyrics,
-                                          atomic_load(&current_track_id));
-            }
-            
-            ui_cache.fmt = p_format;
-            strncpy(ui_cache.filename, playing_filename, 255);
-            ui_cache.header_loaded_for_idx = playing_file_idx;
-            force_redraw = true;
+        strncpy(current_lyrics_backend, "Searching...", sizeof(current_lyrics_backend) - 1);
+        
+        bool pending_questions = !app_config.online_lyrics_asked || 
+                                (app_config.online_lyrics && !app_config.download_online_lyrics_asked);
+                                
+        if (!pending_questions && ui_cache.filepath[0] != '\0') {
+            lyrics_engine_fetch_async(ui_cache.meta.title, ui_cache.meta.artist, ui_cache.meta.album,
+                                      atomic_load(&p_total_sec), ui_cache.filepath, ui_cache.meta.lyrics,
+                                      cur_track);
         }
+
+        force_redraw = true;
     }
     pthread_mutex_unlock(&state_mutex);
 

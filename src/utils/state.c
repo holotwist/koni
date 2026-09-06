@@ -331,6 +331,20 @@ bool player_peek_next_track(char *out_path, size_t path_sz, char *out_name, size
     if (!found) {
         PlaybackSource src = (current_play_source == SOURCE_QUEUE) ? base_play_source : current_play_source;
         int current_idx = (current_play_source == SOURCE_QUEUE) ? base_playing_idx : playing_file_idx;
+
+        if (src == SOURCE_NONE) {
+            if (active_playlist_playback.count > 0 && active_playlist_name[0] != '\0') {
+                src = SOURCE_PLAYLIST;
+                current_idx = (base_playing_idx >= 0) ? base_playing_idx : -1;
+            } else if (num_library_tracks > 0) {
+                src = SOURCE_LIBRARY;
+                current_idx = (base_playing_idx >= 0) ? base_playing_idx : -1;
+            } else if (active_folder.count > 0) {
+                src = SOURCE_FILES;
+                current_idx = (base_playing_idx >= 0) ? base_playing_idx : -1;
+            }
+        }
+
         int total_items = 0;
         if (src == SOURCE_LIBRARY) total_items = num_library_tracks;
         else if (src == SOURCE_FILES) total_items = active_folder.count;
@@ -387,42 +401,60 @@ bool player_advance_track(PlayerCommand cmd) {
     
     pthread_mutex_lock(&state_mutex);
 
-    // If a track just finished and was from the queue, pop it out of the queue
-    if (current_play_source == SOURCE_QUEUE && cmd == CMD_NEXT_AUTO) {
+    // If a track from the queue finished or user pressed Next, pop it out of the queue
+    if (current_play_source == SOURCE_QUEUE && (cmd == CMD_NEXT || cmd == CMD_NEXT_AUTO)) {
         if (repeat_mode != REPEAT_ONE && num_playlist_files > 0) {
-            koni_metadata_free(&playlist[0].meta);
-            for (int i = 0; i < num_playlist_files - 1; i++) {
+            int pop_idx = (playing_file_idx >= 0 && playing_file_idx < num_playlist_files) ? playing_file_idx : 0;
+            koni_metadata_free(&playlist[pop_idx].meta);
+            for (int i = pop_idx; i < num_playlist_files - 1; i++) {
                 playlist[i] = playlist[i + 1];
             }
             num_playlist_files--;
             if (selected_playlist_idx >= num_playlist_files && selected_playlist_idx > 0) {
                 selected_playlist_idx--;
             }
+            playing_file_idx = 0;
         }
     }
 
-    // If there are items in Queue, switch source to Queue immediately
-    if (num_playlist_files > 0 && (current_play_source != SOURCE_QUEUE || cmd == CMD_NEXT_AUTO)) {
-        if (current_play_source != SOURCE_QUEUE && current_play_source != SOURCE_NONE) {
-            base_play_source = current_play_source;
-            base_playing_idx = playing_file_idx;
-        }
-        current_play_source = SOURCE_QUEUE;
+    // If more items remain in the queue, play the next queue item
+    if (current_play_source == SOURCE_QUEUE && num_playlist_files > 0) {
         playing_file_idx = 0;
-
-        strncpy(playing_filepath, playlist[0].path, sizeof(playing_filepath));
-        strncpy(playing_filename, playlist[0].name, sizeof(playing_filename) - 1);
+        strncpy(playing_filepath, playlist[0].path, sizeof(playing_filepath) - 1);
+        strncpy(playing_filename, playlist[0].name, 255);
         pthread_mutex_unlock(&state_mutex);
         return true;
     }
 
-    // Queue is now empty. Return to base source if available
+    // If playing another source and there are items in the queue, switch to Queue
+    if (num_playlist_files > 0 && current_play_source != SOURCE_QUEUE) {
+        base_play_source = current_play_source;
+        base_playing_idx = playing_file_idx;
+        current_play_source = SOURCE_QUEUE;
+        playing_file_idx = 0;
+
+        strncpy(playing_filepath, playlist[0].path, sizeof(playing_filepath) - 1);
+        strncpy(playing_filename, playlist[0].name, 255);
+        pthread_mutex_unlock(&state_mutex);
+        return true;
+    }
+
+    // Queue is now empty, return to active playlist, music library, or folder scope
     if (current_play_source == SOURCE_QUEUE && num_playlist_files == 0) {
         if (base_play_source != SOURCE_NONE) {
             current_play_source = base_play_source;
             playing_file_idx = base_playing_idx;
             base_play_source = SOURCE_NONE;
             base_playing_idx = -1;
+        } else if (active_playlist_playback.count > 0 && active_playlist_name[0] != '\0') {
+            current_play_source = SOURCE_PLAYLIST;
+            playing_file_idx = (base_playing_idx >= 0) ? base_playing_idx : -1;
+        } else if (num_library_tracks > 0) {
+            current_play_source = SOURCE_LIBRARY;
+            playing_file_idx = (base_playing_idx >= 0) ? base_playing_idx : -1;
+        } else if (active_folder.count > 0) {
+            current_play_source = SOURCE_FILES;
+            playing_file_idx = (base_playing_idx >= 0) ? base_playing_idx : -1;
         } else {
             current_play_source = SOURCE_NONE;
             playing_file_idx = -1;

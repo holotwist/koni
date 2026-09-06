@@ -12,7 +12,7 @@ bool vis_needs_full_redraw = false;
 int ui_last_selected_idx = -1;
 int ui_last_playlist_idx = -1;
 char current_lyrics_backend[32] = "";
-UICache ui_cache = { .idx = -2, .header_loaded_for_idx = -2 };
+UICache ui_cache = { .idx = -2, .loaded_track_id = -1 };
 
 int utf8_display_width(const char *str) {
     if (!str) return 0;
