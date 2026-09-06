@@ -42,6 +42,7 @@ typedef enum {
     ACTION_VOL_DOWN,
     ACTION_INFO,
     ACTION_FAVOURITE,
+    ACTION_LOCATE_PLAYING,
     ACTION_COUNT
 } UIAction;
 

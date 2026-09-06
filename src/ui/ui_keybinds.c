@@ -41,7 +41,7 @@ static const KeybindDefault s_defaults[] = {
     { ACTION_SHUFFLE,     "shuffle",          "s, S" },
     { ACTION_REPEAT,      "repeat",           "r, R" },
     { ACTION_REPLAYGAIN,  "replaygain",       "g, G" },
-    { ACTION_LAYOUT,      "layout",           "l, L" },
+    { ACTION_LAYOUT,      "layout",           "l" },
     { ACTION_MUTE,        "mute",             "m, M" },
     { ACTION_PLAY_PAUSE,  "play_pause",       "space, p, P" },
     { ACTION_NEXT,        "next",             "n, N, >" },
@@ -55,7 +55,8 @@ static const KeybindDefault s_defaults[] = {
     { ACTION_VOL_UP,      "volume_up",        "+, =" },
     { ACTION_VOL_DOWN,    "volume_down",      "-, _" },
     { ACTION_INFO,        "track_info",       "i, I" },
-    { ACTION_FAVOURITE,   "favourite",        "*, F" }
+    { ACTION_FAVOURITE,   "favourite",        "*, F" },
+    { ACTION_LOCATE_PLAYING, "locate_playing", "L" }
 };
 
 void ui_keybinds_init(void) {

@@ -114,7 +114,25 @@ int ui_search_render_bar(int y, int x, int w) {
 bool ui_search_handle_input(int ch, BrowserTab tab) {
     if (!search_state.active) return false;
 
-    if (ch == 27) { // ESC, exit and clear
+    if (ch == 27) { // ESC, exit and clear while preserving cursor on selected item
+        static int map[65536];
+        int count = ui_search_get_filtered_indices(tab, map, 65536);
+        if (count > 0 && search_state.selected_idx < count) {
+            int target_idx = map[search_state.selected_idx];
+            if (tab == TAB_MUSIC) {
+                selected_library_idx = target_idx;
+                library_scroll_offset = target_idx - 5;
+                if (library_scroll_offset < 0) library_scroll_offset = 0;
+            } else if (tab == TAB_FILES) {
+                selected_file_idx = target_idx;
+                scroll_offset = target_idx - 5;
+                if (scroll_offset < 0) scroll_offset = 0;
+            } else if (tab == TAB_QUEUE) {
+                selected_playlist_idx = target_idx;
+                playlist_scroll_offset = target_idx - 5;
+                if (playlist_scroll_offset < 0) playlist_scroll_offset = 0;
+            }
+        }
         ui_search_close();
         return true;
     }
@@ -171,9 +189,19 @@ bool ui_search_handle_input(int ch, BrowserTab tab) {
         int count = ui_search_get_filtered_indices(tab, map, 65536);
         if (count > 0 && search_state.selected_idx < count) {
             int target_idx = map[search_state.selected_idx];
-            if (tab == TAB_MUSIC) selected_library_idx = target_idx;
-            else if (tab == TAB_FILES) selected_file_idx = target_idx;
-            else if (tab == TAB_QUEUE) selected_playlist_idx = target_idx;
+            if (tab == TAB_MUSIC) {
+                selected_library_idx = target_idx;
+                library_scroll_offset = target_idx - 5;
+                if (library_scroll_offset < 0) library_scroll_offset = 0;
+            } else if (tab == TAB_FILES) {
+                selected_file_idx = target_idx;
+                scroll_offset = target_idx - 5;
+                if (scroll_offset < 0) scroll_offset = 0;
+            } else if (tab == TAB_QUEUE) {
+                selected_playlist_idx = target_idx;
+                playlist_scroll_offset = target_idx - 5;
+                if (playlist_scroll_offset < 0) playlist_scroll_offset = 0;
+            }
         }
         ui_search_close();
         return false; // Let Enter fall through to trigger the actual playback

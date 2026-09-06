@@ -308,6 +308,62 @@ bool ui_handle_input(int ch) {
             break;
         }
 
+        case ACTION_LOCATE_PLAYING: {
+            pthread_mutex_lock(&state_mutex);
+            if (playing_filepath[0] != '\0') {
+                if (current_browser_tab == TAB_MUSIC && library_tracks && num_library_tracks > 0) {
+                    for (int i = 0; i < num_library_tracks; i++) {
+                        if (strcmp(library_tracks[i].path, playing_filepath) == 0) {
+                            selected_library_idx = i;
+                            library_scroll_offset = i - 5;
+                            if (library_scroll_offset < 0) library_scroll_offset = 0;
+                            ui_status_set("Focused: %.30s", library_tracks[i].name);
+                            break;
+                        }
+                    }
+                } else if (current_browser_tab == TAB_FILES && files && num_files > 0) {
+                    for (int i = 0; i < num_files; i++) {
+                        char full[1024];
+                        snprintf(full, sizeof(full), "%s/%s", current_dir, files[i].name);
+                        if (strcmp(full, playing_filepath) == 0) {
+                            selected_file_idx = i;
+                            scroll_offset = i - 5;
+                            if (scroll_offset < 0) scroll_offset = 0;
+                            ui_status_set("Focused: %.30s", files[i].name);
+                            break;
+                        }
+                    }
+                } else if (current_browser_tab == TAB_QUEUE && playlist && num_playlist_files > 0) {
+                    for (int i = 0; i < num_playlist_files; i++) {
+                        if (strcmp(playlist[i].path, playing_filepath) == 0) {
+                            selected_playlist_idx = i;
+                            playlist_scroll_offset = i - 5;
+                            if (playlist_scroll_offset < 0) playlist_scroll_offset = 0;
+                            ui_status_set("Focused: %.30s", playlist[i].name);
+                            break;
+                        }
+                    }
+                } else if (current_browser_tab == TAB_PLAYLISTS && playlist_in_drilldown) {
+                    LoadedPlaylist lp;
+                    if (playlist_mgmt_load_playlist(active_playlist_name, &lp)) {
+                        for (int i = 0; i < lp.count; i++) {
+                            if (strcmp(lp.items[i].path, playing_filepath) == 0) {
+                                selected_playlist_track_idx = i;
+                                playlist_track_scroll_offset = i - 5;
+                                if (playlist_track_scroll_offset < 0) playlist_track_scroll_offset = 0;
+                                ui_status_set("Focused: %.30s", lp.items[i].title[0] ? lp.items[i].title : lp.items[i].path);
+                                break;
+                            }
+                        }
+                        playlist_mgmt_free_loaded(&lp);
+                    }
+                }
+            }
+            pthread_mutex_unlock(&state_mutex);
+            force_redraw = true;
+            break;
+        }
+
         case ACTION_SORT:
             if (current_browser_tab == TAB_MUSIC) {
                 current_library_sort = (DBSortMode)((current_library_sort + 1) % DB_SORT_COUNT);
