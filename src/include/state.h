@@ -31,14 +31,16 @@ typedef struct {
 typedef enum {
     TAB_QUEUE = 0,
     TAB_MUSIC = 1,
-    TAB_FILES = 2
+    TAB_PLAYLISTS = 2,
+    TAB_FILES = 3
 } BrowserTab;
 
 typedef enum {
     SOURCE_NONE = 0,
     SOURCE_FILES,
     SOURCE_QUEUE,
-    SOURCE_LIBRARY
+    SOURCE_LIBRARY,
+    SOURCE_PLAYLIST
 } PlaybackSource;
 
 typedef enum {
@@ -88,6 +90,14 @@ extern int num_library_tracks;
 extern int selected_library_idx;
 extern int library_scroll_offset;
 extern DBSortMode current_library_sort;
+
+// Playlists navigation and scope state
+extern int selected_playlist_browser_idx;
+extern int playlist_browser_scroll_offset;
+extern bool playlist_in_drilldown;
+extern char active_playlist_name[128];
+extern int selected_playlist_track_idx;
+extern int playlist_track_scroll_offset;
 
 // Playback session storage for Files context
 typedef struct {

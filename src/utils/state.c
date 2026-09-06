@@ -27,6 +27,13 @@ int selected_library_idx = 0;
 int library_scroll_offset = 0;
 DBSortMode current_library_sort = DB_SORT_TITLE;
 
+int selected_playlist_browser_idx = 0;
+int playlist_browser_scroll_offset = 0;
+bool playlist_in_drilldown = false;
+char active_playlist_name[128] = "";
+int selected_playlist_track_idx = 0;
+int playlist_track_scroll_offset = 0;
+
 ActiveFolderContext active_folder = { .dir = "", .file_names = NULL, .count = 0 };
 PlaybackSource base_play_source = SOURCE_NONE;
 int base_playing_idx = -1;

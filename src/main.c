@@ -8,6 +8,7 @@
 #include "protocols/mpris.h"
 #include "vis_math.h"
 #include "config.h"
+#include "playlist_manager.h"
 #include <curl/curl.h>
 
 #include <locale.h>
@@ -33,6 +34,7 @@ int main(int argc, char **argv) {
     setlocale(LC_ALL, ""); 
     config_init(); // Initialize configuration manager
     db_init(); // Initialize SQLite cache
+    playlist_mgmt_init(); // Initialize playlists & favourites
     curl_global_init(CURL_GLOBAL_DEFAULT);
     load_state(); // Load all the previous state
     library_reload(); // Read database tracks into memory
@@ -71,6 +73,7 @@ int main(int argc, char **argv) {
     save_state(); // Dump state before exiting
     config_save(); // Save configuration
     file_list_shutdown();
+    playlist_mgmt_shutdown();
     db_shutdown();
     config_cleanup();
     
