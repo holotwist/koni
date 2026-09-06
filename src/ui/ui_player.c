@@ -1,5 +1,6 @@
 #include "ui_common.h"
 #include "ui_animations.h"
+#include "ui_status.h"
 #include <string.h>
 #include <math.h>
 
@@ -185,4 +186,7 @@ void draw_player_panel(int y, int x, int h, int w) {
         mvaddstr(vu_y, center_x + 1 + bar_len, " ");
         if (clip_hold_r > 0) attroff(COLOR_PAIR(10) | A_REVERSE);
     }
+
+    // Render the non-shifting status highlight over the bottom border if active
+    ui_status_render(y, x, h, w);
 }

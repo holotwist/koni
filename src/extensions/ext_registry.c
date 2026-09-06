@@ -2,6 +2,7 @@
 #include "ext_registry.h"
 #include "state.h"
 #include "ui_common.h"
+#include "ui_status.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -85,8 +86,12 @@ static void host_request_redraw(void) {
 }
 
 static void host_set_status_message(const char *fmt, ...) {
-    (void)fmt;
-    // Reserved for status line rendering
+    va_list args;
+    va_start(args, fmt);
+    char buf[256];
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    ui_status_set("%s", buf);
 }
 
 static KoniHostContext g_host_ctx = {

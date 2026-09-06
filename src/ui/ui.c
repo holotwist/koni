@@ -9,6 +9,8 @@
 #include "file_list.h"
 #include "lyrics.h"
 #include "config.h"
+#include "ui_modal.h"
+#include "ui_status.h"
 #include <ncurses.h>
 #include <stdlib.h>
 #include <string.h>
@@ -289,6 +291,9 @@ static void ui_loop(void) {
         attroff(A_BOLD | COLOR_PAIR(4));
     }
 
+    // Overlay modals on top of active screens
+    ui_modal_render(max_y, max_x);
+
     refresh();
     vis_needs_full_redraw = false;
 }
@@ -324,6 +329,8 @@ void ui_run(bool force_colors) {
     }
 
     srand(time(NULL));
+    ui_status_init();
+    ui_modal_init();
 
     bool running = true;
     int current_timeout = 25;

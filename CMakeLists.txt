@@ -78,6 +78,8 @@ add_executable(koni
     src/ui/ui_common.c
     src/ui/ui_animations.c
     src/ui/widgets/ui_search.c
+    src/ui/widgets/ui_status.c
+    src/ui/widgets/ui_modal.c
     src/database/db.c
     src/database/library_scanner.c
     src/playlist/playlist_manager.c
@@ -107,6 +109,7 @@ target_include_directories(koni PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/codec_api>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/lyrics_api>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/extensions_api>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/ui/widgets>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/extensions>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/third_party>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/codecs/pxtone_codec>
