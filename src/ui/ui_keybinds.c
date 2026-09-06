@@ -49,11 +49,13 @@ static const KeybindDefault s_defaults[] = {
     { ACTION_TAB_VIS,     "tab_vis",          "1" },
     { ACTION_TAB_LYRICS,  "tab_lyrics",       "2" },
     { ACTION_VIS_MODE,    "vis_mode",         "c, C" },
-    { ACTION_FULLSCREEN,  "fullscreen",       "f, F" },
+    { ACTION_FULLSCREEN,  "fullscreen",       "f" },
     { ACTION_TOGGLE_VIS,  "toggle_vis",       "v, V" },
     { ACTION_TOGGLE_LRC,  "toggle_lrc",       "y, Y" },
     { ACTION_VOL_UP,      "volume_up",        "+, =" },
-    { ACTION_VOL_DOWN,    "volume_down",      "-, _" }
+    { ACTION_VOL_DOWN,    "volume_down",      "-, _" },
+    { ACTION_INFO,        "track_info",       "i, I" },
+    { ACTION_FAVOURITE,   "favourite",        "*, F" }
 };
 
 void ui_keybinds_init(void) {

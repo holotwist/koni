@@ -31,7 +31,7 @@ extern UICache ui_cache;
 // Utility functions
 void ui_draw_box(int y, int x, int h, int w, const char* title, int color_pair);
 int utf8_display_width(const char *str);
-void format_list_item(char* out_buf, size_t out_size, int max_w, const char* filename, KoniMetadata* meta, uint32_t duration_sec, bool is_dir);
+void format_list_item(char* out_buf, size_t out_size, int max_w, const char* filename, KoniMetadata* meta, uint32_t duration_sec, bool is_dir, bool is_fav);
 int utf8_byte_offset_for_width(const char *str, int target_width);
 int utf8_byte_offset_for_suffix(const char *str, int target_width);
 
@@ -39,6 +39,7 @@ int utf8_byte_offset_for_suffix(const char *str, int target_width);
 void draw_files_panel(int y, int x, int h, int w);
 void draw_queue_panel(int y, int x, int h, int w);
 void draw_musiclist_panel(int y, int x, int h, int w);
+void draw_playlists_panel(int y, int x, int h, int w);
 void draw_vis_panel(int y, int x, int h, int w);
 void draw_player_panel(int y, int x, int h, int w);
 void draw_lrc_overlay(int y, int x, int h, int w);

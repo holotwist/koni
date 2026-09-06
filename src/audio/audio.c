@@ -234,6 +234,18 @@ void *audio_thread_func(void *arg) {
             atomic_store(&p_frames_consumed, 0);
             apply_stream_to_global_state(&cur_stream);
 
+            // Seek to restored position if available
+            int saved_target_ms = atomic_load(&seek_target_ms);
+            if (saved_target_ms > 0 && cur_stream.codec && cur_stream.dec) {
+                uint64_t target_sample = ((uint64_t)saved_target_ms * cur_stream.fmt.sample_rate) / 1000ULL;
+                if (cur_stream.codec->seek(cur_stream.dec, target_sample)) {
+                    cur_stream.frames_decoded = target_sample;
+                    atomic_store(&p_frames_consumed, (uint32_t)target_sample);
+                    atomic_store(&p_current_sec, (uint32_t)(target_sample / cur_stream.fmt.sample_rate));
+                }
+                atomic_store(&seek_target_ms, -1);
+            }
+
             atomic_store(&current_cmd_atomic, CMD_NONE);
             atomic_store(&play_state_atomic, STATE_PLAYING);
 

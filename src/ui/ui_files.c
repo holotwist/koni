@@ -2,6 +2,7 @@
 #include "ui_animations.h"
 #include "file_list.h"
 #include "config.h"
+#include "playlist_manager.h"
 #include <string.h>
 
 void draw_files_panel(int y, int x, int h, int w) {
@@ -71,14 +72,15 @@ void draw_files_panel(int y, int x, int h, int w) {
         char formatted_name[512] = {0};
 
         pthread_mutex_lock(&state_mutex);
+        bool is_fav = !files[idx].is_dir && playlist_mgmt_is_favourite(item_path);
         if (is_selected_dir) {
             char tagged_name[300];
             snprintf(tagged_name, sizeof(tagged_name), "%s  (Selected)", files[idx].name);
             format_list_item(formatted_name, sizeof(formatted_name), max_disp_len, tagged_name, 
-                             NULL, 0, true);
+                             NULL, 0, true, false);
         } else {
             format_list_item(formatted_name, sizeof(formatted_name), max_disp_len, files[idx].name, 
-                             files[idx].metadata_loaded ? &files[idx].meta : NULL, files[idx].duration_sec, files[idx].is_dir);
+                             files[idx].metadata_loaded ? &files[idx].meta : NULL, files[idx].duration_sec, files[idx].is_dir, is_fav);
         }
         pthread_mutex_unlock(&state_mutex);
         

@@ -13,12 +13,6 @@ static char s_status_msg[256] = {0};
 static struct timespec s_expire_time = {0};
 static bool s_active = false;
 
-static int64_t get_time_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000LL + (ts.tv_nsec / 1000000LL);
-}
-
 void ui_status_init(void) {
     s_status_msg[0] = '\0';
     s_active = false;

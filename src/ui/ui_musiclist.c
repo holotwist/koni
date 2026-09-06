@@ -1,6 +1,7 @@
 #include "ui_common.h"
 #include "ui_animations.h"
 #include "db.h"
+#include "playlist_manager.h"
 #include <string.h>
 
 void draw_musiclist_panel(int y, int x, int h, int w) {
@@ -72,11 +73,12 @@ void draw_musiclist_panel(int y, int x, int h, int w) {
             meta.has_track_gain = library_tracks[idx].has_track_gain;
             meta.track_gain = library_tracks[idx].track_gain;
         }
+        bool is_fav = library_tracks && idx < num_library_tracks ? playlist_mgmt_is_favourite(library_tracks[idx].path) : false;
         pthread_mutex_unlock(&state_mutex);
 
         char formatted_name[512] = {0};
         format_list_item(formatted_name, sizeof(formatted_name), max_disp_len, track_name, 
-                         &meta, dur, false);
+                         &meta, dur, false, is_fav);
 
         char disp_buf[1024] = {0};
         int text_w = utf8_display_width(formatted_name);

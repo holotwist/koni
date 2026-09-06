@@ -40,6 +40,8 @@ typedef enum {
     ACTION_TOGGLE_LRC,
     ACTION_VOL_UP,
     ACTION_VOL_DOWN,
+    ACTION_INFO,
+    ACTION_FAVOURITE,
     ACTION_COUNT
 } UIAction;
 

@@ -9,6 +9,7 @@
 #include "file_list.h"
 #include "lyrics.h"
 #include "config.h"
+#include "playlist_manager.h"
 #include "ui_modal.h"
 #include "ui_status.h"
 #include <ncurses.h>
@@ -22,12 +23,29 @@ static void ui_update_state(void) {
 
     pthread_mutex_lock(&state_mutex);
     if (playing_file_idx != ui_cache.idx || strncmp(playing_filepath, ui_cache.filepath, sizeof(ui_cache.filepath)) != 0) {
+        // Cursor follows song only in Music tab and only if cursor was already on the previous song
+        if (current_browser_tab == TAB_MUSIC && library_tracks && num_library_tracks > 0) {
+            bool cursor_was_on_song = false;
+            if (ui_cache.filepath[0] != '\0' && selected_library_idx >= 0 && selected_library_idx < num_library_tracks) {
+                if (strcmp(library_tracks[selected_library_idx].path, ui_cache.filepath) == 0) {
+                    cursor_was_on_song = true;
+                }
+            }
+
+            if (cursor_was_on_song && playing_filepath[0] != '\0') {
+                for (int i = 0; i < num_library_tracks; i++) {
+                    if (strcmp(library_tracks[i].path, playing_filepath) == 0) {
+                        selected_library_idx = i;
+                        break;
+                    }
+                }
+            }
+        }
+
         koni_metadata_free(&ui_cache.meta);
         memset(&ui_cache.meta, 0, sizeof(ui_cache.meta));
         memset(&ui_cache.fmt, 0, sizeof(ui_cache.fmt));
         ui_cache.filename[0] = '\0';
-        
-        // Do not force the selector cursor to the song. It stays where the user leaves it
 
         ui_cache.idx = playing_file_idx;
         strncpy(ui_cache.filepath, playing_filepath, sizeof(ui_cache.filepath) - 1);
@@ -75,14 +93,19 @@ static void ui_update_state(void) {
     }
     pthread_mutex_unlock(&state_mutex);
 
-    uint32_t target_play_pos = atomic_load(&p_frames_consumed);
-    uint32_t srate = atomic_load(&vis_srate);
-    if (srate == 0) srate = 44100;
-    uint32_t nominal_advance = (srate * 15u) / 1000u;
-    int32_t diff = (int32_t)(target_play_pos - ui_cache.smooth_rpos);
-    
-    if (abs(diff) > (int32_t)srate) ui_cache.smooth_rpos = target_play_pos;
-    else ui_cache.smooth_rpos += nominal_advance + (diff / 5); 
+    PlayState cur_st = (PlayState)atomic_load(&play_state_atomic);
+    if (cur_st == STATE_PLAYING) {
+        uint32_t target_play_pos = atomic_load(&p_frames_consumed);
+        uint32_t srate = atomic_load(&vis_srate);
+        if (srate == 0) srate = 44100;
+        uint32_t nominal_advance = (srate * 15u) / 1000u;
+        int32_t diff = (int32_t)(target_play_pos - ui_cache.smooth_rpos);
+        
+        if (abs(diff) > (int32_t)srate) ui_cache.smooth_rpos = target_play_pos;
+        else ui_cache.smooth_rpos += nominal_advance + (diff / 5); 
+    } else if (cur_st == STATE_STOPPED) {
+        ui_cache.smooth_rpos = 0;
+    }
 
     koni_extensions_on_tick();
 }
@@ -200,6 +223,11 @@ static void ui_loop(void) {
         attroff(current_browser_tab == TAB_MUSIC ? A_REVERSE : A_NORMAL);
         printw(" ");
 
+        attron(current_browser_tab == TAB_PLAYLISTS ? A_REVERSE : A_NORMAL);
+        printw("Playlists (%d)", playlist_mgmt_get_count());
+        attroff(current_browser_tab == TAB_PLAYLISTS ? A_REVERSE : A_NORMAL);
+        printw(" ");
+
         attron(current_browser_tab == TAB_FILES ? A_REVERSE : A_NORMAL);
         printw("Files");
         attroff(current_browser_tab == TAB_FILES ? A_REVERSE : A_NORMAL);
@@ -207,6 +235,7 @@ static void ui_loop(void) {
 
         if (current_browser_tab == TAB_QUEUE) draw_queue_panel(vis_h, 0, browser_h, max_x);
         else if (current_browser_tab == TAB_MUSIC) draw_musiclist_panel(vis_h, 0, browser_h, max_x);
+        else if (current_browser_tab == TAB_PLAYLISTS) draw_playlists_panel(vis_h, 0, browser_h, max_x);
         else draw_files_panel(vis_h, 0, browser_h, max_x);
     } else {
         // Horizontal, Left Single Browser, Right Visualizer/Lyrics
@@ -222,6 +251,11 @@ static void ui_loop(void) {
         attroff(current_browser_tab == TAB_MUSIC ? A_REVERSE : A_NORMAL);
         printw(" ");
 
+        attron(current_browser_tab == TAB_PLAYLISTS ? A_REVERSE : A_NORMAL);
+        printw("Playlists (%d)", playlist_mgmt_get_count());
+        attroff(current_browser_tab == TAB_PLAYLISTS ? A_REVERSE : A_NORMAL);
+        printw(" ");
+
         attron(current_browser_tab == TAB_FILES ? A_REVERSE : A_NORMAL);
         printw("Files");
         attroff(current_browser_tab == TAB_FILES ? A_REVERSE : A_NORMAL);
@@ -229,6 +263,7 @@ static void ui_loop(void) {
 
         if (current_browser_tab == TAB_QUEUE) draw_queue_panel(0, 0, top_h, browser_w);
         else if (current_browser_tab == TAB_MUSIC) draw_musiclist_panel(0, 0, top_h, browser_w);
+        else if (current_browser_tab == TAB_PLAYLISTS) draw_playlists_panel(0, 0, top_h, browser_w);
         else draw_files_panel(0, 0, top_h, browser_w);
 
         if (show_visualizer && vis_w > 0) {

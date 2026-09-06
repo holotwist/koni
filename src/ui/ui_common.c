@@ -101,7 +101,12 @@ int utf8_byte_offset_for_suffix(const char *str, int target_width) {
     return byte_offset;
 }
 
-void format_list_item(char* out_buf, size_t out_size, int max_w, const char* filename, KoniMetadata* meta, uint32_t duration_sec, bool is_dir) {
+void format_list_item(char* out_buf, size_t out_size, int max_w, const char* filename, KoniMetadata* meta, uint32_t duration_sec, bool is_dir, bool is_fav) {
+    const char *fav_icon = is_dir ? "" : (is_fav ? "★ " : "  ");
+    int icon_len = utf8_display_width(fav_icon);
+    int eff_max_w = max_w - icon_len;
+    if (eff_max_w < 1) eff_max_w = 1;
+
     if (is_dir) {
         snprintf(out_buf, out_size, "%s", filename);
         return;
@@ -136,26 +141,26 @@ void format_list_item(char* out_buf, size_t out_size, int max_w, const char* fil
         int a_pad = w_artist - utf8_display_width(a_buf); if(a_pad<0) a_pad=0;
         int al_pad = w_album - utf8_display_width(al_buf); if(al_pad<0) al_pad=0;
         
-        snprintf(out_buf, out_size, "%s%*s %s%*s %s%*s %s", 
-            t_buf, t_pad, "", a_buf, a_pad, "", al_buf, al_pad, "", time_str);
+        snprintf(out_buf, out_size, "%s%s%*s %s%*s %s%*s %s", 
+            fav_icon, t_buf, t_pad, "", a_buf, a_pad, "", al_buf, al_pad, "", time_str);
     } else if (meta && (meta->title || meta->artist)) {
         const char* title = meta->title && strlen(meta->title) ? meta->title : filename;
+        char body[512];
         if (meta->artist && strlen(meta->artist)) {
-            snprintf(out_buf, out_size, "%s - %s", title, meta->artist);
+            snprintf(body, sizeof(body), "%s - %s", title, meta->artist);
         } else {
-            snprintf(out_buf, out_size, "%s", title);
+            snprintf(body, sizeof(body), "%s", title);
         }
         if (duration_sec > 0) {
-            char temp[512];
-            snprintf(temp, sizeof(temp), "%s", out_buf);
-            snprintf(out_buf, out_size, "%s (%s)", temp, time_str);
+            snprintf(out_buf, out_size, "%s%s (%s)", fav_icon, body, time_str);
+        } else {
+            snprintf(out_buf, out_size, "%s%s", fav_icon, body);
         }
     } else {
-        snprintf(out_buf, out_size, "%s", filename);
         if (duration_sec > 0) {
-            char temp[512];
-            snprintf(temp, sizeof(temp), "%s", out_buf);
-            snprintf(out_buf, out_size, "%s (%s)", temp, time_str);
+            snprintf(out_buf, out_size, "%s%s (%s)", fav_icon, filename, time_str);
+        } else {
+            snprintf(out_buf, out_size, "%s%s", fav_icon, filename);
         }
     }
 }

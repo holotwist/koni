@@ -86,6 +86,7 @@ add_executable(koni
     src/ui/ui_files.c
     src/ui/ui_queue.c
     src/ui/ui_musiclist.c
+    src/ui/ui_playlists.c
     src/ui/ui_vis.c
     src/ui/ui_lrc_overlay.c
     src/ui/visualizers/vis_renderer.c

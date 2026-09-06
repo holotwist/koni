@@ -7,6 +7,7 @@ pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <unistd.h>
 
 char current_dir[1024] = ".";
 FileEntry *files = NULL;
@@ -35,6 +36,7 @@ int selected_playlist_track_idx = 0;
 int playlist_track_scroll_offset = 0;
 
 ActiveFolderContext active_folder = { .dir = "", .file_names = NULL, .count = 0 };
+ActivePlaylistPlaybackContext active_playlist_playback = { .name = "", .paths = NULL, .titles = NULL, .count = 0 };
 PlaybackSource base_play_source = SOURCE_NONE;
 int base_playing_idx = -1;
 
@@ -50,6 +52,17 @@ void library_reload(void) {
     }
     num_library_tracks = db_load_all_tracks(&library_tracks, current_library_sort);
     if (selected_library_idx >= num_library_tracks) selected_library_idx = (num_library_tracks > 0) ? num_library_tracks - 1 : 0;
+
+    // Align library index with restored song if playing from library
+    if (playing_filepath[0] != '\0' && current_play_source == SOURCE_LIBRARY) {
+        for (int i = 0; i < num_library_tracks; i++) {
+            if (strcmp(library_tracks[i].path, playing_filepath) == 0) {
+                selected_library_idx = i;
+                playing_file_idx = i;
+                break;
+            }
+        }
+    }
     pthread_mutex_unlock(&state_mutex);
 }
 
@@ -177,6 +190,12 @@ void load_state(void) {
     FILE *f = fopen(path, "r");
     if (!f) return;
 
+    char saved_track_path[1024] = {0};
+    char saved_track_name[256] = {0};
+    int saved_source = 0;
+    int saved_idx = -1;
+    uint32_t saved_pos_sec = 0;
+
     char line[1024];
     while (fgets(line, sizeof(line), f)) {
         char *saveptr = NULL;
@@ -195,9 +214,47 @@ void load_state(void) {
             else if (strcmp(key, "show_lrc_overlay") == 0) show_lrc_overlay = atoi(val) ? true : false;
             else if (strcmp(key, "active_tab") == 0) active_tab = atoi(val);
             else if (strcmp(key, "browser_tab") == 0) current_browser_tab = (BrowserTab)atoi(val);
+            else if (strcmp(key, "playing_filepath") == 0) strncpy(saved_track_path, val, sizeof(saved_track_path)-1);
+            else if (strcmp(key, "playing_filename") == 0) strncpy(saved_track_name, val, sizeof(saved_track_name)-1);
+            else if (strcmp(key, "play_source") == 0) saved_source = atoi(val);
+            else if (strcmp(key, "playing_file_idx") == 0) saved_idx = atoi(val);
+            else if (strcmp(key, "base_play_source") == 0) base_play_source = (PlaybackSource)atoi(val);
+            else if (strcmp(key, "base_playing_idx") == 0) base_playing_idx = atoi(val);
+            else if (strcmp(key, "active_playlist") == 0) strncpy(active_playlist_name, val, sizeof(active_playlist_name)-1);
+            else if (strcmp(key, "play_pos_sec") == 0) saved_pos_sec = (uint32_t)atoi(val);
         }
     }
     fclose(f);
+
+    // Restore playing track state if file still exists
+    if (saved_track_path[0] != '\0' && access(saved_track_path, F_OK) == 0) {
+        strncpy(playing_filepath, saved_track_path, sizeof(playing_filepath)-1);
+        strncpy(playing_filename, saved_track_name, sizeof(playing_filename)-1);
+        current_play_source = (PlaybackSource)saved_source;
+        playing_file_idx = saved_idx;
+
+        if (saved_pos_sec > 0) {
+            atomic_store(&p_current_sec, saved_pos_sec);
+            atomic_store(&seek_target_ms, (int)saved_pos_sec * 1000);
+        }
+
+        // Preload metadata & total duration for immediate UI display
+        struct stat st;
+        if (stat(saved_track_path, &st) == 0) {
+            uint32_t dur = 0;
+            if (db_get_track_meta(saved_track_path, st.st_mtime, &p_metadata, &dur)) {
+                atomic_store(&p_total_sec, dur);
+            } else {
+                const KoniCodecImpl *codec = koni_find_codec_by_ext(saved_track_path);
+                if (codec && codec->read_metadata) {
+                    codec->read_metadata(saved_track_path, &p_metadata, &dur);
+                    atomic_store(&p_total_sec, dur);
+                }
+            }
+        }
+        atomic_store(&header_ready_for_idx, playing_file_idx);
+        atomic_store(&play_state_atomic, STATE_STOPPED);
+    }
 }
 
 void save_state(void) {
@@ -228,6 +285,17 @@ void save_state(void) {
     fprintf(f, "active_tab=%d\n", active_tab);
     fprintf(f, "browser_tab=%d\n", (int)current_browser_tab);
     
+    if (playing_filepath[0] != '\0') {
+        fprintf(f, "playing_filepath=%s\n", playing_filepath);
+        fprintf(f, "playing_filename=%s\n", playing_filename);
+        fprintf(f, "playing_file_idx=%d\n", playing_file_idx);
+        fprintf(f, "play_source=%d\n", (int)current_play_source);
+        fprintf(f, "base_play_source=%d\n", (int)base_play_source);
+        fprintf(f, "base_playing_idx=%d\n", base_playing_idx);
+        fprintf(f, "active_playlist=%s\n", active_playlist_name);
+        fprintf(f, "play_pos_sec=%u\n", atomic_load(&p_current_sec));
+    }
+
     fclose(f);
     save_playlist_queue();
 }
@@ -267,6 +335,7 @@ bool player_peek_next_track(char *out_path, size_t path_sz, char *out_name, size
         if (src == SOURCE_LIBRARY) total_items = num_library_tracks;
         else if (src == SOURCE_FILES) total_items = active_folder.count;
         else if (src == SOURCE_QUEUE) total_items = num_playlist_files;
+        else if (src == SOURCE_PLAYLIST) total_items = active_playlist_playback.count;
 
         if (total_items > 0) {
             int next_idx = -1;
@@ -292,6 +361,9 @@ bool player_peek_next_track(char *out_path, size_t path_sz, char *out_name, size
                 } else if (src == SOURCE_QUEUE) {
                     if (out_path) strncpy(out_path, playlist[next_idx].path, path_sz - 1);
                     if (out_name) strncpy(out_name, playlist[next_idx].name, name_sz - 1);
+                } else if (src == SOURCE_PLAYLIST) {
+                    if (out_path) strncpy(out_path, active_playlist_playback.paths[next_idx], path_sz - 1);
+                    if (out_name) strncpy(out_name, active_playlist_playback.titles[next_idx], name_sz - 1);
                 }
                 if (out_idx) *out_idx = next_idx;
                 found = true;
@@ -367,6 +439,8 @@ bool player_advance_track(PlayerCommand cmd) {
         total_items = active_folder.count;
     } else if (current_play_source == SOURCE_QUEUE) {
         total_items = num_playlist_files;
+    } else if (current_play_source == SOURCE_PLAYLIST) {
+        total_items = active_playlist_playback.count;
     }
 
     int next_idx = -1;
@@ -426,6 +500,9 @@ bool player_advance_track(PlayerCommand cmd) {
         } else if (current_play_source == SOURCE_QUEUE) {
             strncpy(playing_filepath, playlist[next_idx].path, sizeof(playing_filepath));
             strncpy(playing_filename, playlist[next_idx].name, 255);
+        } else if (current_play_source == SOURCE_PLAYLIST) {
+            strncpy(playing_filepath, active_playlist_playback.paths[next_idx], sizeof(playing_filepath));
+            strncpy(playing_filename, active_playlist_playback.titles[next_idx], 255);
         }
         playing_file_idx = next_idx;
         found = true;

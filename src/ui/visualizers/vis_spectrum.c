@@ -68,11 +68,16 @@ void draw_vis_spectrum(int y, int x, int draw_w, int draw_h) {
         float val = log10f(1.0f + norm_mag * 100.0f) / 2.0f; 
         if (val > 1.0f) val = 1.0f;
         
-        if (val >= smooth_bars[px]) {
-            smooth_bars[px] = val; 
-        } else { 
-            smooth_bars[px] -= 0.04f; 
-            if (smooth_bars[px] < 0.0f) smooth_bars[px] = 0.0f; 
+        PlayState st = (PlayState)atomic_load(&play_state_atomic);
+        if (st == STATE_PLAYING) {
+            if (val >= smooth_bars[px]) {
+                smooth_bars[px] = val; 
+            } else { 
+                smooth_bars[px] -= 0.04f; 
+                if (smooth_bars[px] < 0.0f) smooth_bars[px] = 0.0f; 
+            }
+        } else if (st == STATE_STOPPED) {
+            smooth_bars[px] = 0.0f;
         }
         
         int bar_h = (int)(smooth_bars[px] * px_h); 

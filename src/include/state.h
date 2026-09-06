@@ -106,7 +106,15 @@ typedef struct {
     int count;
 } ActiveFolderContext;
 
+typedef struct {
+    char name[128];
+    char **paths;
+    char **titles;
+    int count;
+} ActivePlaylistPlaybackContext;
+
 extern ActiveFolderContext active_folder;
+extern ActivePlaylistPlaybackContext active_playlist_playback;
 extern PlaybackSource base_play_source;
 extern int base_playing_idx;
 

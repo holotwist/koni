@@ -140,20 +140,32 @@ void draw_player_panel(int y, int x, int h, int w) {
         int clip_r = (peak_r > 1.0f);
         
         static int clip_hold_l = 0; static int clip_hold_r = 0;
-        if (clip_l) clip_hold_l = 20; else if (clip_hold_l > 0) clip_hold_l--;
-        if (clip_r) clip_hold_r = 20; else if (clip_hold_r > 0) clip_hold_r--;
-
-        float db_l = (peak_l < 0.001f) ? -60.0f : 20.0f * log10f(peak_l);
-        float db_r = (peak_r < 0.001f) ? -60.0f : 20.0f * log10f(peak_r);
-        peak_l = (db_l + 40.0f) / 40.0f; peak_r = (db_r + 40.0f) / 40.0f;
-        if (peak_l < 0.0f) peak_l = 0.0f;
-        if (peak_l > 1.0f) peak_l = 1.0f;
-        if (peak_r < 0.0f) peak_r = 0.0f;
-        if (peak_r > 1.0f) peak_r = 1.0f;
-
         static float smooth_peak_l = 0.0f; static float smooth_peak_r = 0.0f;
-        if (peak_l > smooth_peak_l) smooth_peak_l = peak_l; else { smooth_peak_l -= 0.03f; if (smooth_peak_l < 0.0f) smooth_peak_l = 0.0f; }
-        if (peak_r > smooth_peak_r) smooth_peak_r = peak_r; else { smooth_peak_r -= 0.03f; if (smooth_peak_r < 0.0f) smooth_peak_r = 0.0f; }
+        PlayState st = (PlayState)atomic_load(&play_state_atomic);
+
+        if (st == STATE_PLAYING) {
+            if (clip_l) clip_hold_l = 20; else if (clip_hold_l > 0) clip_hold_l--;
+            if (clip_r) clip_hold_r = 20; else if (clip_hold_r > 0) clip_hold_r--;
+
+            float db_l = (peak_l < 0.001f) ? -60.0f : 20.0f * log10f(peak_l);
+            float db_r = (peak_r < 0.001f) ? -60.0f : 20.0f * log10f(peak_r);
+            peak_l = (db_l + 40.0f) / 40.0f; peak_r = (db_r + 40.0f) / 40.0f;
+            if (peak_l < 0.0f) peak_l = 0.0f;
+            if (peak_l > 1.0f) peak_l = 1.0f;
+            if (peak_r < 0.0f) peak_r = 0.0f;
+            if (peak_r > 1.0f) peak_r = 1.0f;
+
+            if (peak_l >= smooth_peak_l) smooth_peak_l = peak_l; 
+            else { smooth_peak_l -= 0.03f; if (smooth_peak_l < 0.0f) smooth_peak_l = 0.0f; }
+
+            if (peak_r >= smooth_peak_r) smooth_peak_r = peak_r; 
+            else { smooth_peak_r -= 0.03f; if (smooth_peak_r < 0.0f) smooth_peak_r = 0.0f; }
+        } else if (st == STATE_STOPPED) {
+            clip_hold_l = 0;
+            clip_hold_r = 0;
+            smooth_peak_l = 0.0f;
+            smooth_peak_r = 0.0f;
+        }
 
         int bar_len = (w - 10) / 2;
         if (bar_len > 24) bar_len = 24;

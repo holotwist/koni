@@ -1,5 +1,6 @@
 #include "ui_common.h"
 #include "ui_animations.h"
+#include "playlist_manager.h"
 #include <string.h>
 
 void draw_queue_panel(int y, int x, int h, int w) {
@@ -46,8 +47,9 @@ void draw_queue_panel(int y, int x, int h, int w) {
         
         char formatted_name[512] = {0};
         pthread_mutex_lock(&state_mutex);
+        bool is_fav = playlist_mgmt_is_favourite(playlist[idx].path);
         format_list_item(formatted_name, sizeof(formatted_name), max_disp_len, playlist[idx].name, 
-                         playlist[idx].metadata_loaded ? &playlist[idx].meta : NULL, playlist[idx].duration_sec, false);
+                         playlist[idx].metadata_loaded ? &playlist[idx].meta : NULL, playlist[idx].duration_sec, false, is_fav);
         pthread_mutex_unlock(&state_mutex);
                          
         char disp_buf[1024] = {0};

@@ -8,6 +8,9 @@
 #include "config.h"
 #include "lyrics.h"
 #include "file_list.h"
+#include "playlist_manager.h"
+#include "ui_modal.h"
+#include "ui_status.h"
 
 #include <ncurses.h>
 #include <string.h>
@@ -35,6 +38,19 @@ static void browser_navigate_delta(int delta) {
             sel = &selected_library_idx;
             max = num_library_tracks;
             break;
+        case TAB_PLAYLISTS:
+            if (playlist_in_drilldown) {
+                sel = &selected_playlist_track_idx;
+                LoadedPlaylist lp;
+                if (playlist_mgmt_load_playlist(active_playlist_name, &lp)) {
+                    max = lp.count;
+                    playlist_mgmt_free_loaded(&lp);
+                }
+            } else {
+                sel = &selected_playlist_browser_idx;
+                max = playlist_mgmt_get_count();
+            }
+            break;
     }
 
     if (!sel || max <= 0) return;
@@ -60,6 +76,19 @@ static void browser_navigate_to(bool to_bottom) {
         case TAB_MUSIC:
             sel = &selected_library_idx;
             max = num_library_tracks;
+            break;
+        case TAB_PLAYLISTS:
+            if (playlist_in_drilldown) {
+                sel = &selected_playlist_track_idx;
+                LoadedPlaylist lp;
+                if (playlist_mgmt_load_playlist(active_playlist_name, &lp)) {
+                    max = lp.count;
+                    playlist_mgmt_free_loaded(&lp);
+                }
+            } else {
+                sel = &selected_playlist_browser_idx;
+                max = playlist_mgmt_get_count();
+            }
             break;
     }
 
@@ -102,6 +131,11 @@ static void perform_seek_relative(int delta_ms) {
 }
 
 bool ui_handle_input(int ch) {
+    // Active modal takes top priority for all input
+    if (ui_modal_handle_input(ch)) {
+        return true;
+    }
+
     if (ui_search_handle_input(ch, current_browser_tab)) {
         return true;
     }
@@ -182,12 +216,97 @@ bool ui_handle_input(int ch) {
             break;
             
         case ACTION_SWITCH_TAB:
-            current_browser_tab = (current_browser_tab + 1) % 3;
+            current_browser_tab = (current_browser_tab + 1) % 4;
             break;
             
         case ACTION_RESCAN:
             library_scanner_start();
+            playlist_mgmt_refresh_list();
             break;
+
+        case ACTION_INFO: {
+            ModalTrackContext ctx = {0};
+            if (current_browser_tab == TAB_MUSIC && num_library_tracks > 0) {
+                DBTrack *t = &library_tracks[selected_library_idx];
+                strncpy(ctx.path, t->path, sizeof(ctx.path) - 1);
+                strncpy(ctx.title, t->title ? t->title : t->name, sizeof(ctx.title) - 1);
+                strncpy(ctx.artist, t->artist ? t->artist : "", sizeof(ctx.artist) - 1);
+                strncpy(ctx.album, t->album ? t->album : "", sizeof(ctx.album) - 1);
+                ctx.duration_sec = t->duration_sec;
+                ctx.in_playlist = false;
+                ui_modal_open_track_actions(&ctx);
+            } else if (current_browser_tab == TAB_FILES && num_files > 0 && !files[selected_file_idx].is_dir) {
+                snprintf(ctx.path, sizeof(ctx.path), "%s/%s", current_dir, files[selected_file_idx].name);
+                strncpy(ctx.title, files[selected_file_idx].meta.title ? files[selected_file_idx].meta.title : files[selected_file_idx].name, sizeof(ctx.title) - 1);
+                strncpy(ctx.artist, files[selected_file_idx].meta.artist ? files[selected_file_idx].meta.artist : "", sizeof(ctx.artist) - 1);
+                strncpy(ctx.album, files[selected_file_idx].meta.album ? files[selected_file_idx].meta.album : "", sizeof(ctx.album) - 1);
+                ctx.duration_sec = files[selected_file_idx].duration_sec;
+                ctx.in_playlist = false;
+                ui_modal_open_track_actions(&ctx);
+            } else if (current_browser_tab == TAB_QUEUE && num_playlist_files > 0) {
+                PlaylistEntry *pe = &playlist[selected_playlist_idx];
+                strncpy(ctx.path, pe->path, sizeof(ctx.path) - 1);
+                strncpy(ctx.title, pe->meta.title ? pe->meta.title : pe->name, sizeof(ctx.title) - 1);
+                strncpy(ctx.artist, pe->meta.artist ? pe->meta.artist : "", sizeof(ctx.artist) - 1);
+                strncpy(ctx.album, pe->meta.album ? pe->meta.album : "", sizeof(ctx.album) - 1);
+                ctx.duration_sec = pe->duration_sec;
+                ctx.in_playlist = false;
+                ui_modal_open_track_actions(&ctx);
+            } else if (current_browser_tab == TAB_PLAYLISTS) {
+                if (playlist_in_drilldown) {
+                    LoadedPlaylist lp;
+                    if (playlist_mgmt_load_playlist(active_playlist_name, &lp) && selected_playlist_track_idx < lp.count) {
+                        PlaylistTrackItem *ti = &lp.items[selected_playlist_track_idx];
+                        strncpy(ctx.path, ti->path, sizeof(ctx.path) - 1);
+                        strncpy(ctx.title, ti->title, sizeof(ctx.title) - 1);
+                        strncpy(ctx.artist, ti->artist, sizeof(ctx.artist) - 1);
+                        ctx.duration_sec = ti->duration_sec;
+                        ctx.in_playlist = true;
+                        strncpy(ctx.playlist_name, active_playlist_name, sizeof(ctx.playlist_name) - 1);
+                        ctx.playlist_track_idx = selected_playlist_track_idx;
+                        ui_modal_open_track_actions(&ctx);
+                    }
+                    playlist_mgmt_free_loaded(&lp);
+                } else {
+                    const PlaylistSummary *ps = playlist_mgmt_get_summary(selected_playlist_browser_idx);
+                    if (ps) ui_modal_open_playlist_actions(ps->name);
+                }
+            }
+            break;
+        }
+
+        case ACTION_FAVOURITE: {
+            const char *path = NULL;
+            const char *title = NULL;
+            const char *artist = NULL;
+            uint32_t dur = 0;
+
+            if (current_browser_tab == TAB_MUSIC && num_library_tracks > 0) {
+                path = library_tracks[selected_library_idx].path;
+                title = library_tracks[selected_library_idx].title;
+                artist = library_tracks[selected_library_idx].artist;
+                dur = library_tracks[selected_library_idx].duration_sec;
+            } else if (current_browser_tab == TAB_FILES && num_files > 0 && !files[selected_file_idx].is_dir) {
+                char full[1024];
+                snprintf(full, sizeof(full), "%s/%s", current_dir, files[selected_file_idx].name);
+                path = full;
+                title = files[selected_file_idx].meta.title ? files[selected_file_idx].meta.title : files[selected_file_idx].name;
+                artist = files[selected_file_idx].meta.artist;
+                dur = files[selected_file_idx].duration_sec;
+            } else if (current_browser_tab == TAB_QUEUE && num_playlist_files > 0) {
+                path = playlist[selected_playlist_idx].path;
+                title = playlist[selected_playlist_idx].meta.title ? playlist[selected_playlist_idx].meta.title : playlist[selected_playlist_idx].name;
+                artist = playlist[selected_playlist_idx].meta.artist;
+                dur = playlist[selected_playlist_idx].duration_sec;
+            }
+
+            if (path) {
+                bool is_fav = playlist_mgmt_toggle_favourite(path, title, artist, dur);
+                ui_status_set(is_fav ? "Added to Favourites ★" : "Removed from Favourites");
+                force_redraw = true;
+            }
+            break;
+        }
 
         case ACTION_SORT:
             if (current_browser_tab == TAB_MUSIC) {
@@ -223,7 +342,12 @@ bool ui_handle_input(int ch) {
             break;
             
         case ACTION_SEEK_BACK:
-            perform_seek_relative(-5000);
+            if (current_browser_tab == TAB_PLAYLISTS && playlist_in_drilldown) {
+                playlist_in_drilldown = false;
+                force_redraw = true;
+            } else {
+                perform_seek_relative(-5000);
+            }
             break;
 
         case ACTION_SEEK_FWD:
@@ -400,6 +524,51 @@ bool ui_handle_input(int ch) {
                 history_len = 0; history_idx = -1;
                 pthread_mutex_unlock(&state_mutex);
                 atomic_store(&current_cmd_atomic, CMD_PLAY);
+            } else if (current_browser_tab == TAB_PLAYLISTS) {
+                if (!playlist_in_drilldown) {
+                    const PlaylistSummary *ps = playlist_mgmt_get_summary(selected_playlist_browser_idx);
+                    if (ps) {
+                        strncpy(active_playlist_name, ps->name, sizeof(active_playlist_name) - 1);
+                        playlist_in_drilldown = true;
+                        selected_playlist_track_idx = 0;
+                        playlist_track_scroll_offset = 0;
+                        force_redraw = true;
+                    }
+                } else {
+                    LoadedPlaylist lp;
+                    if (playlist_mgmt_load_playlist(active_playlist_name, &lp) && lp.count > 0) {
+                        pthread_mutex_lock(&state_mutex);
+                        // Setup scoped playlist playback
+                        if (active_playlist_playback.paths) {
+                            for (int i = 0; i < active_playlist_playback.count; i++) {
+                                free(active_playlist_playback.paths[i]);
+                                free(active_playlist_playback.titles[i]);
+                            }
+                            free(active_playlist_playback.paths);
+                            free(active_playlist_playback.titles);
+                        }
+                        active_playlist_playback.count = lp.count;
+                        active_playlist_playback.paths = malloc(sizeof(char*) * lp.count);
+                        active_playlist_playback.titles = malloc(sizeof(char*) * lp.count);
+                        for (int i = 0; i < lp.count; i++) {
+                            active_playlist_playback.paths[i] = strdup(lp.items[i].path);
+                            active_playlist_playback.titles[i] = strdup(lp.items[i].title[0] ? lp.items[i].title : lp.items[i].path);
+                        }
+                        strncpy(active_playlist_playback.name, active_playlist_name, sizeof(active_playlist_playback.name) - 1);
+
+                        int sel_idx = selected_playlist_track_idx;
+                        if (sel_idx >= lp.count) sel_idx = 0;
+
+                        current_play_source = SOURCE_PLAYLIST;
+                        playing_file_idx = sel_idx;
+                        strncpy(playing_filepath, lp.items[sel_idx].path, sizeof(playing_filepath) - 1);
+                        strncpy(playing_filename, lp.items[sel_idx].title[0] ? lp.items[sel_idx].title : lp.items[sel_idx].path, 255);
+                        history_len = 0; history_idx = -1;
+                        pthread_mutex_unlock(&state_mutex);
+                        atomic_store(&current_cmd_atomic, CMD_PLAY);
+                    }
+                    playlist_mgmt_free_loaded(&lp);
+                }
             }
             break;
             
@@ -464,7 +633,11 @@ bool ui_handle_input(int ch) {
         }
 
         case ACTION_PLAY_PAUSE:
-            atomic_store(&current_cmd_atomic, CMD_PAUSE);
+            if (atomic_load(&play_state_atomic) == STATE_STOPPED && playing_filepath[0] != '\0') {
+                atomic_store(&current_cmd_atomic, CMD_PLAY);
+            } else {
+                atomic_store(&current_cmd_atomic, CMD_PAUSE);
+            }
             break;
 
         case ACTION_NEXT:
