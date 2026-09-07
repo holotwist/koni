@@ -43,6 +43,7 @@ typedef enum {
     ACTION_INFO,
     ACTION_FAVOURITE,
     ACTION_LOCATE_PLAYING,
+    ACTION_TOGGLE_EQ,
     ACTION_COUNT
 } UIAction;
 

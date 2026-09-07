@@ -11,6 +11,7 @@
 #include "playlist_manager.h"
 #include "ui_modal.h"
 #include "ui_status.h"
+#include "ui_eq.h"
 
 #include <ncurses.h>
 #include <string.h>
@@ -140,6 +141,11 @@ static void perform_seek_relative(int delta_ms) {
 bool ui_handle_input(int ch) {
     // Active modal takes top priority for all input
     if (ui_modal_handle_input(ch)) {
+        return true;
+    }
+
+    // Active Equalizer view intercepts navigation
+    if (ui_eq_handle_input(ch)) {
         return true;
     }
 
@@ -314,6 +320,11 @@ bool ui_handle_input(int ch) {
             }
             break;
         }
+
+        case ACTION_TOGGLE_EQ:
+            ui_eq_toggle();
+            force_redraw = true;
+            break;
 
         case ACTION_LOCATE_PLAYING: {
             pthread_mutex_lock(&state_mutex);

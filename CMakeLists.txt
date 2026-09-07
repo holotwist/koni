@@ -83,6 +83,8 @@ add_executable(koni
     src/database/db.c
     src/database/library_scanner.c
     src/playlist/playlist_manager.c
+    src/equ/equalizer.c
+    src/ui/ui_eq.c
     src/ui/ui_files.c
     src/ui/ui_queue.c
     src/ui/ui_musiclist.c
@@ -107,6 +109,7 @@ add_executable(koni
 target_include_directories(koni PUBLIC 
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/playlist>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/equ>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/codec_api>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/lyrics_api>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/extensions_api>

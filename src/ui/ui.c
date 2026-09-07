@@ -12,6 +12,7 @@
 #include "playlist_manager.h"
 #include "ui_modal.h"
 #include "ui_status.h"
+#include "ui_eq.h"
 #include <ncurses.h>
 #include <stdlib.h>
 #include <string.h>
@@ -116,6 +117,7 @@ static const HelpItem help_items[] = {
     {"i", "Info"},
     {"F/*", "Fav"},
     {"L", "Locate"},
+    {"E", "EQ"},
     {"s", "Shuffle"},
     {"r", "Repeat"},
     {"g", "RGain"},
@@ -195,6 +197,8 @@ static void ui_loop(void) {
 
     if (is_fullscreen) {
         if (show_visualizer && top_h > 0) draw_vis_panel(0, 0, top_h, max_x);
+    } else if (ui_eq_is_active()) {
+        draw_eq_panel(0, 0, top_h, max_x);
     } else if (is_vertical) {
         int vis_h = show_visualizer ? (top_h * 40 / 100) : 0;
         int browser_h = top_h - vis_h;

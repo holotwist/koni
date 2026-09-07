@@ -6,6 +6,7 @@
 #include "codec.h"
 #include "extension.h"
 #include "replaygain/replaygain.h"
+#include "equalizer.h"
 
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
@@ -447,6 +448,11 @@ void *audio_thread_func(void *arg) {
                     }
                 }
                 break;
+            }
+
+            // Process Graphic Equalizer & Soft Limiter right before volume scaling
+            if (mix_samples > 0) {
+                eq_process(interleaved, mix_samples, cur_stream.fmt.num_channels, cur_stream.fmt.sample_rate);
             }
 
             // Apply cubic volume scaling
