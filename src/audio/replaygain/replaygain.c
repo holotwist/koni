@@ -38,10 +38,23 @@ void rgain_process_float(RGainState *rg, float *samples, uint32_t num_frames) {
     if (rg->mode == RGAIN_OFF) return;
 
     if (rg->mode == RGAIN_META && rg->has_meta) {
-        float mult = rg->current_multiplier;
-        uint32_t total = num_frames * rg->channels;
-        for (uint32_t i = 0; i < total; i++) {
-            samples[i] *= mult;
+        float target_mult = rg->target_multiplier;
+
+        if (fabsf(rg->current_multiplier - target_mult) < 0.0001f) {
+            rg->current_multiplier = target_mult;
+            uint32_t total = num_frames * rg->channels;
+            for (uint32_t i = 0; i < total; i++) {
+                samples[i] *= target_mult;
+            }
+        } else {
+            // Slew multiplier smoothly over the frames
+            for (uint32_t i = 0; i < num_frames; i++) {
+                rg->current_multiplier += SMOOTHING * 8.0f * (target_mult - rg->current_multiplier);
+                uint32_t base = i * rg->channels;
+                for (uint32_t c = 0; c < rg->channels; c++) {
+                    samples[base + c] *= rg->current_multiplier;
+                }
+            }
         }
         return;
     }

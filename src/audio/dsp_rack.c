@@ -1,42 +1,30 @@
 #define _DEFAULT_SOURCE
 #include "dsp_rack.h"
 #include "equalizer.h"
+#include "dc_blocker.h"
+#include "limiter.h"
 #include "state.h"
 #include <stdlib.h>
 #include <math.h>
 
 #define FLOAT_CHUNK_CAPACITY (16384 * 8)
 static float *s_float_buf = NULL;
-static uint32_t s_dither_prng_state = 0x12345678;
+static float s_current_vol_factor = -1.0f; // -1 indicates uninitialized
+static DCBlocker s_dc_blocker;
+static LookaheadLimiter s_limiter;
 
 void dsp_rack_init(void) {
     if (!s_float_buf) {
         s_float_buf = malloc(sizeof(float) * FLOAT_CHUNK_CAPACITY);
     }
+    dc_blocker_init(&s_dc_blocker, 44100);
+    limiter_init(&s_limiter, 44100);
 }
 
-/* Fast Triangular Probability Density Function (TPDF) Dither Generator */
-static inline float generate_tpdf_dither(void) {
-    s_dither_prng_state = s_dither_prng_state * 1664525u + 1013904223u;
-    int32_t r1 = (int32_t)s_dither_prng_state;
-    s_dither_prng_state = s_dither_prng_state * 1664525u + 1013904223u;
-    int32_t r2 = (int32_t)s_dither_prng_state;
-
-    // Sum of two uniform independent random variables yields triangular distribution
-    return ((float)r1 + (float)r2) * (1.0f / 4294967296.0f);
-}
-
-/* Soft knee limiter */
-static inline float soft_limit_sample(float x) {
-    const float threshold = 0.85f;
-    if (x > threshold) {
-        float excess = x - threshold;
-        return threshold + (1.0f - threshold) * tanhf(excess / (1.0f - threshold));
-    } else if (x < -threshold) {
-        float excess = -x - threshold;
-        return -(threshold + (1.0f - threshold) * tanhf(excess / (1.0f - threshold)));
-    }
-    return x;
+void dsp_rack_reset(void) {
+    dc_blocker_reset(&s_dc_blocker);
+    limiter_reset(&s_limiter);
+    s_current_vol_factor = -1.0f;
 }
 
 void dsp_rack_process(const int32_t *pcm_in, float *float_out, uint32_t num_frames,
@@ -50,6 +38,9 @@ void dsp_rack_process(const int32_t *pcm_in, float *float_out, uint32_t num_fram
     for (uint32_t s = 0; s < total_samples; s++) {
         float_out[s] = (float)pcm_in[s] * (1.0f / 2147483648.0f);
     }
+
+    // Infrasonic DC-Offset blocker
+    dc_blocker_process(&s_dc_blocker, float_out, num_frames, num_channels, sample_rate);
 
     // ReplayGain
     if (rgain && rgain_mode != RGAIN_OFF) {
@@ -79,19 +70,40 @@ void dsp_rack_process(const int32_t *pcm_in, float *float_out, uint32_t num_fram
     atomic_store(&vis_wpos, local_wpos);
 
     // Cubic Volume Curve
-    float vol_factor = 0.0f;
+    float target_vol = 0.0f;
     if (volume_percent > 0) {
         if (volume_percent <= 100) {
             float norm = (float)volume_percent / 100.0f;
-            vol_factor = norm * norm * norm;
+            target_vol = norm * norm * norm;
         } else {
             float boost = (float)(volume_percent - 100) / 100.0f;
-            vol_factor = 1.0f + boost;
+            target_vol = 1.0f + boost;
         }
     }
 
-    // True-Peak Soft Limiter (tanh knee)
-    for (uint32_t s = 0; s < total_samples; s++) {
-        float_out[s] = soft_limit_sample(float_out[s] * vol_factor);
+    if (s_current_vol_factor < 0.0f) {
+        s_current_vol_factor = target_vol;
     }
+
+    float vol_alpha = 1.0f - expf(-1.0f / ((float)sample_rate * 0.015f));
+
+    if (fabsf(s_current_vol_factor - target_vol) < 0.00001f) {
+        s_current_vol_factor = target_vol;
+        if (target_vol != 1.0f) {
+            for (uint32_t s = 0; s < total_samples; s++) {
+                float_out[s] *= target_vol;
+            }
+        }
+    } else {
+        for (uint32_t f = 0; f < num_frames; f++) {
+            s_current_vol_factor += vol_alpha * (target_vol - s_current_vol_factor);
+            uint32_t base = f * num_channels;
+            for (uint16_t c = 0; c < num_channels; c++) {
+                float_out[base + c] *= s_current_vol_factor;
+            }
+        }
+    }
+
+    // Lookahead True-Peak Mastering Limiter (Channel-linked, 96-sample lookahead, -0.2 dBFS ceiling)
+    limiter_process(&s_limiter, float_out, num_frames, num_channels, sample_rate);
 }

@@ -6,6 +6,7 @@
 #include "replaygain/replaygain.h"
 
 void dsp_rack_init(void);
+void dsp_rack_reset(void);
 
 /* Processes audio using the chain
  * Converts int32 to 32-bit float [-1.0, +1.0]

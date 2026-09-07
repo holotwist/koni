@@ -64,6 +64,8 @@ add_executable(koni
     src/audio/output_device.c
     src/audio/stream_reader.c
     src/audio/dsp_rack.c
+    src/audio/dc_blocker.c
+    src/audio/limiter.c
     src/audio/replaygain/replaygain.c
     src/utils/config_manager/config.c
     src/codecs/codec_registry.c

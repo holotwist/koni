@@ -37,49 +37,49 @@ static const int s_preset_count = (int)(sizeof(s_presets) / sizeof(s_presets[0])
 
 static pthread_mutex_t s_eq_mutex = PTHREAD_MUTEX_INITIALIZER;
 static bool s_enabled = false;
-static float s_band_gains[EQ_NUM_BANDS] = {0};
+static float s_target_gains[EQ_NUM_BANDS] = {0};
+static float s_current_gains[EQ_NUM_BANDS] = {0};
+static bool s_needs_smoothing = false;
 static int s_current_preset = 0; // 0 = Flat, -1 = Custom
 static uint32_t s_current_srate = 44100;
 static BiquadBand s_filters[EQ_NUM_BANDS];
+
+static void compute_biquad_coefficients(BiquadBand *filter, float f0, float gain_db, uint32_t srate) {
+    if (fabsf(gain_db) < 0.05f || f0 >= (float)srate * 0.49f) {
+        filter->b0 = 1.0f;
+        filter->b1 = 0.0f;
+        filter->b2 = 0.0f;
+        filter->a1 = 0.0f;
+        filter->a2 = 0.0f;
+        return;
+    }
+
+    const float Q = 1.4142f; // ~1-octave bandwidth
+    float A = powf(10.0f, gain_db / 40.0f);
+    float w0 = 2.0f * (float)M_PI * (f0 / (float)srate);
+    float alpha = sinf(w0) / (2.0f * Q);
+    float cos_w = cosf(w0);
+
+    float b0 = 1.0f + alpha * A;
+    float b1 = -2.0f * cos_w;
+    float b2 = 1.0f - alpha * A;
+    float a0 = 1.0f + alpha / A;
+    float a1 = -2.0f * cos_w;
+    float a2 = 1.0f - alpha / A;
+
+    filter->b0 = b0 / a0;
+    filter->b1 = b1 / a0;
+    filter->b2 = b2 / a0;
+    filter->a1 = a1 / a0;
+    filter->a2 = a2 / a0;
+}
 
 static void recalculate_coefficients_locked(uint32_t srate) {
     if (srate == 0) srate = 44100;
     s_current_srate = srate;
 
-    const float Q = 1.4142f; // ~1-octave bandwidth
-
     for (int b = 0; b < EQ_NUM_BANDS; b++) {
-        float f0 = s_frequencies[b];
-        float gain_db = s_band_gains[b];
-
-        if (fabsf(gain_db) < 0.05f || f0 >= (float)srate * 0.49f) {
-            // Bypass filter for this band
-            s_filters[b].b0 = 1.0f;
-            s_filters[b].b1 = 0.0f;
-            s_filters[b].b2 = 0.0f;
-            s_filters[b].a1 = 0.0f;
-            s_filters[b].a2 = 0.0f;
-            continue;
-        }
-
-        // RBJ Audio EQ Cookbook Peak Filter
-        float A = powf(10.0f, gain_db / 40.0f);
-        float w0 = 2.0f * (float)M_PI * (f0 / (float)srate);
-        float alpha = sinf(w0) / (2.0f * Q);
-        float cos_w = cosf(w0);
-
-        float b0 = 1.0f + alpha * A;
-        float b1 = -2.0f * cos_w;
-        float b2 = 1.0f - alpha * A;
-        float a0 = 1.0f + alpha / A;
-        float a1 = -2.0f * cos_w;
-        float a2 = 1.0f - alpha / A;
-
-        s_filters[b].b0 = b0 / a0;
-        s_filters[b].b1 = b1 / a0;
-        s_filters[b].b2 = b2 / a0;
-        s_filters[b].a1 = a1 / a0;
-        s_filters[b].a2 = a2 / a0;
+        compute_biquad_coefficients(&s_filters[b], s_frequencies[b], s_current_gains[b], srate);
     }
 }
 
@@ -87,7 +87,9 @@ void eq_init(void) {
     pthread_mutex_lock(&s_eq_mutex);
     s_enabled = false;
     s_current_preset = 0;
-    memset(s_band_gains, 0, sizeof(s_band_gains));
+    memset(s_target_gains, 0, sizeof(s_target_gains));
+    memset(s_current_gains, 0, sizeof(s_current_gains));
+    s_needs_smoothing = false;
     memset(s_filters, 0, sizeof(s_filters));
     recalculate_coefficients_locked(44100);
     pthread_mutex_unlock(&s_eq_mutex);
@@ -115,7 +117,7 @@ void eq_toggle_enabled(void) {
 float eq_get_band_gain(int band_idx) {
     if (band_idx < 0 || band_idx >= EQ_NUM_BANDS) return 0.0f;
     pthread_mutex_lock(&s_eq_mutex);
-    float g = s_band_gains[band_idx];
+    float g = s_target_gains[band_idx];
     pthread_mutex_unlock(&s_eq_mutex);
     return g;
 }
@@ -126,21 +128,21 @@ void eq_set_band_gain(int band_idx, float gain_db) {
     if (gain_db > EQ_MAX_GAIN_DB) gain_db = EQ_MAX_GAIN_DB;
 
     pthread_mutex_lock(&s_eq_mutex);
-    s_band_gains[band_idx] = gain_db;
+    s_target_gains[band_idx] = gain_db;
     s_current_preset = -1; // Mark as Custom
-    recalculate_coefficients_locked(s_current_srate);
+    s_needs_smoothing = true;
     pthread_mutex_unlock(&s_eq_mutex);
 }
 
 void eq_adjust_band_gain(int band_idx, float delta_db) {
     if (band_idx < 0 || band_idx >= EQ_NUM_BANDS) return;
     pthread_mutex_lock(&s_eq_mutex);
-    float g = s_band_gains[band_idx] + delta_db;
+    float g = s_target_gains[band_idx] + delta_db;
     if (g < EQ_MIN_GAIN_DB) g = EQ_MIN_GAIN_DB;
     if (g > EQ_MAX_GAIN_DB) g = EQ_MAX_GAIN_DB;
-    s_band_gains[band_idx] = g;
+    s_target_gains[band_idx] = g;
     s_current_preset = -1;
-    recalculate_coefficients_locked(s_current_srate);
+    s_needs_smoothing = true;
     pthread_mutex_unlock(&s_eq_mutex);
 }
 
@@ -164,16 +166,16 @@ void eq_apply_preset(int preset_idx) {
     if (preset_idx < 0 || preset_idx >= s_preset_count) return;
     pthread_mutex_lock(&s_eq_mutex);
     s_current_preset = preset_idx;
-    memcpy(s_band_gains, s_presets[preset_idx].gains, sizeof(s_band_gains));
-    recalculate_coefficients_locked(s_current_srate);
+    memcpy(s_target_gains, s_presets[preset_idx].gains, sizeof(s_target_gains));
+    s_needs_smoothing = true;
     pthread_mutex_unlock(&s_eq_mutex);
 }
 
 void eq_cycle_preset(void) {
     pthread_mutex_lock(&s_eq_mutex);
     s_current_preset = (s_current_preset + 1) % s_preset_count;
-    memcpy(s_band_gains, s_presets[s_current_preset].gains, sizeof(s_band_gains));
-    recalculate_coefficients_locked(s_current_srate);
+    memcpy(s_target_gains, s_presets[s_current_preset].gains, sizeof(s_target_gains));
+    s_needs_smoothing = true;
     pthread_mutex_unlock(&s_eq_mutex);
 }
 
@@ -197,7 +199,7 @@ void eq_save_state(void *file_ptr) {
     fprintf(f, "eq_preset=%d\n", s_current_preset);
     fprintf(f, "eq_gains=");
     for (int i = 0; i < EQ_NUM_BANDS; i++) {
-        fprintf(f, "%s%.1f", (i > 0) ? "," : "", s_band_gains[i]);
+        fprintf(f, "%s%.1f", (i > 0) ? "," : "", s_target_gains[i]);
     }
     fprintf(f, "\n");
     pthread_mutex_unlock(&s_eq_mutex);
@@ -221,9 +223,12 @@ void eq_load_state_key(const char *key, const char *val) {
             float g = (float)atof(tok);
             if (g < EQ_MIN_GAIN_DB) g = EQ_MIN_GAIN_DB;
             if (g > EQ_MAX_GAIN_DB) g = EQ_MAX_GAIN_DB;
-            s_band_gains[idx++] = g;
+            s_target_gains[idx] = g;
+            s_current_gains[idx] = g;
+            idx++;
             tok = strtok_r(NULL, ",", &saveptr);
         }
+        s_needs_smoothing = false;
         recalculate_coefficients_locked(s_current_srate);
     }
     pthread_mutex_unlock(&s_eq_mutex);
@@ -242,6 +247,8 @@ static inline float eq_soft_limit(float x) {
     return x;
 }
 
+#define SUB_BLOCK_SIZE 32
+
 void eq_process_float(float *samples_interleaved, uint32_t num_frames, uint16_t num_channels, uint32_t sample_rate) {
     if (!samples_interleaved || num_frames == 0 || num_channels == 0) return;
 
@@ -256,24 +263,52 @@ void eq_process_float(float *samples_interleaved, uint32_t num_frames, uint16_t 
     }
 
     uint16_t channels = (num_channels <= EQ_MAX_CHANNELS) ? num_channels : EQ_MAX_CHANNELS;
+    uint32_t frames_processed = 0;
 
-    for (uint32_t f = 0; f < num_frames; f++) {
-        uint32_t base = f * num_channels;
+    // ~20ms time constant for EQ band morphing
+    float block_alpha = 1.0f - expf(-((float)SUB_BLOCK_SIZE) / ((float)sample_rate * 0.020f));
 
-        for (uint16_t c = 0; c < channels; c++) {
-            float x = samples_interleaved[base + c];
+    while (frames_processed < num_frames) {
+        uint32_t block_frames = num_frames - frames_processed;
+        if (block_frames > SUB_BLOCK_SIZE) block_frames = SUB_BLOCK_SIZE;
 
-            // Cascade through 10 biquad peak filters
+        // Smoothly slew target gains and update biquad coefficients
+        if (s_needs_smoothing) {
+            bool any_moving = false;
             for (int b = 0; b < EQ_NUM_BANDS; b++) {
-                BiquadBand *filter = &s_filters[b];
-                float y = filter->b0 * x + filter->s1[c];
-                filter->s1[c] = filter->b1 * x - filter->a1 * y + filter->s2[c];
-                filter->s2[c] = filter->b2 * x - filter->a2 * y;
-                x = y;
+                float diff = s_target_gains[b] - s_current_gains[b];
+                if (fabsf(diff) > 0.01f) {
+                    s_current_gains[b] += block_alpha * diff;
+                    compute_biquad_coefficients(&s_filters[b], s_frequencies[b], s_current_gains[b], sample_rate);
+                    any_moving = true;
+                } else if (s_current_gains[b] != s_target_gains[b]) {
+                    s_current_gains[b] = s_target_gains[b];
+                    compute_biquad_coefficients(&s_filters[b], s_frequencies[b], s_current_gains[b], sample_rate);
+                }
             }
-
-            samples_interleaved[base + c] = x;
+            s_needs_smoothing = any_moving;
         }
+
+        // Filter block
+        for (uint32_t f = 0; f < block_frames; f++) {
+            uint32_t base = (frames_processed + f) * num_channels;
+
+            for (uint16_t c = 0; c < channels; c++) {
+                float x = samples_interleaved[base + c];
+
+                for (int b = 0; b < EQ_NUM_BANDS; b++) {
+                    BiquadBand *filter = &s_filters[b];
+                    float y = filter->b0 * x + filter->s1[c];
+                    filter->s1[c] = filter->b1 * x - filter->a1 * y + filter->s2[c];
+                    filter->s2[c] = filter->b2 * x - filter->a2 * y;
+                    x = y;
+                }
+
+                samples_interleaved[base + c] = x;
+            }
+        }
+
+        frames_processed += block_frames;
     }
 
     pthread_mutex_unlock(&s_eq_mutex);

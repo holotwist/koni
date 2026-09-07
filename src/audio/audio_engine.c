@@ -95,6 +95,7 @@ void *audio_thread_func(void *arg) {
             atomic_store(&current_cmd_atomic, CMD_NONE);
             atomic_store(&play_state_atomic, STATE_PLAYING);
 
+            dsp_rack_reset();
             atomic_store(&vis_wpos, 0);
             memset(vis_ring_l, 0, sizeof(vis_ring_l));
             memset(vis_ring_r, 0, sizeof(vis_ring_r));
@@ -161,6 +162,7 @@ void *audio_thread_func(void *arg) {
                         atomic_store(&p_frames_consumed, (uint32_t)target_sample);
                         atomic_store(&p_current_sec, (uint32_t)(target_sample / cur_stream.fmt.sample_rate));
 
+                        dsp_rack_reset();
                         memset(vis_ring_l, 0, sizeof(vis_ring_l));
                         memset(vis_ring_r, 0, sizeof(vis_ring_r));
                         output_device_start();
