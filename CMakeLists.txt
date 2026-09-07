@@ -60,7 +60,10 @@ add_executable(koni
     src/lyrics/lrc_plugin/lrc_parser.c
     src/lyrics/lrc_plugin/lrc_net.c
     src/lyrics/ttml_plugin/ttml_plugin.c
-    src/audio/audio.c
+    src/audio/audio_engine.c
+    src/audio/output_device.c
+    src/audio/stream_reader.c
+    src/audio/dsp_rack.c
     src/audio/replaygain/replaygain.c
     src/utils/config_manager/config.c
     src/codecs/codec_registry.c
@@ -108,6 +111,7 @@ add_executable(koni
 
 target_include_directories(koni PUBLIC 
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/audio>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/playlist>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/equ>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/codec_api>

@@ -28,7 +28,10 @@ void rgain_init(RGainState *rg, uint32_t sample_rate, uint32_t channels);
 void rgain_set_meta(RGainState *rg, bool has_meta, float track_gain_db);
 void rgain_set_mode(RGainState *rg, RGainMode mode);
 
-// 32-bit PCM
+// Native 32-bit Float DSP
+void rgain_process_float(RGainState *rg, float *samples, uint32_t num_frames);
+
+// Legacy int32 wrapper
 void rgain_process(RGainState *rg, int32_t *pcm, uint32_t num_frames);
 
 #endif // REPLAYGAIN_H

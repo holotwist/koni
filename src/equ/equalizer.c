@@ -242,6 +242,43 @@ static inline float eq_soft_limit(float x) {
     return x;
 }
 
+void eq_process_float(float *samples_interleaved, uint32_t num_frames, uint16_t num_channels, uint32_t sample_rate) {
+    if (!samples_interleaved || num_frames == 0 || num_channels == 0) return;
+
+    pthread_mutex_lock(&s_eq_mutex);
+    if (!s_enabled) {
+        pthread_mutex_unlock(&s_eq_mutex);
+        return;
+    }
+
+    if (sample_rate != s_current_srate) {
+        recalculate_coefficients_locked(sample_rate);
+    }
+
+    uint16_t channels = (num_channels <= EQ_MAX_CHANNELS) ? num_channels : EQ_MAX_CHANNELS;
+
+    for (uint32_t f = 0; f < num_frames; f++) {
+        uint32_t base = f * num_channels;
+
+        for (uint16_t c = 0; c < channels; c++) {
+            float x = samples_interleaved[base + c];
+
+            // Cascade through 10 biquad peak filters
+            for (int b = 0; b < EQ_NUM_BANDS; b++) {
+                BiquadBand *filter = &s_filters[b];
+                float y = filter->b0 * x + filter->s1[c];
+                filter->s1[c] = filter->b1 * x - filter->a1 * y + filter->s2[c];
+                filter->s2[c] = filter->b2 * x - filter->a2 * y;
+                x = y;
+            }
+
+            samples_interleaved[base + c] = x;
+        }
+    }
+
+    pthread_mutex_unlock(&s_eq_mutex);
+}
+
 void eq_process(int32_t *pcm_interleaved, uint32_t num_frames, uint16_t num_channels, uint32_t sample_rate) {
     if (!pcm_interleaved || num_frames == 0 || num_channels == 0) return;
 

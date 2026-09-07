@@ -34,6 +34,51 @@ void rgain_set_mode(RGainState *rg, RGainMode mode) {
     }
 }
 
+void rgain_process_float(RGainState *rg, float *samples, uint32_t num_frames) {
+    if (rg->mode == RGAIN_OFF) return;
+
+    if (rg->mode == RGAIN_META && rg->has_meta) {
+        float mult = rg->current_multiplier;
+        uint32_t total = num_frames * rg->channels;
+        for (uint32_t i = 0; i < total; i++) {
+            samples[i] *= mult;
+        }
+        return;
+    }
+
+    if (rg->mode == RGAIN_CALC || (rg->mode == RGAIN_META && !rg->has_meta)) {
+        float alpha = rg->energy_alpha;
+        float avg_energy = rg->avg_energy;
+
+        for (uint32_t i = 0; i < num_frames; i++) {
+            float sum_squares = 0.0f;
+            uint32_t base = i * rg->channels;
+            for (uint32_t c = 0; c < rg->channels; c++) {
+                float sample = samples[base + c];
+                sum_squares += sample * sample;
+            }
+
+            float frame_energy = sum_squares / (float)rg->channels;
+            avg_energy += alpha * (frame_energy - avg_energy);
+
+            float rms = sqrtf(avg_energy);
+            if (rms > 0.001f) {
+                float desired_mult = TARGET_RMS / rms;
+                if (desired_mult > 3.0f) desired_mult = 3.0f;
+                if (desired_mult < 0.25f) desired_mult = 0.25f;
+                rg->target_multiplier += SMOOTHING * (desired_mult - rg->target_multiplier);
+            }
+
+            rg->current_multiplier += SMOOTHING * 4.0f * (rg->target_multiplier - rg->current_multiplier);
+
+            for (uint32_t c = 0; c < rg->channels; c++) {
+                samples[base + c] *= rg->current_multiplier;
+            }
+        }
+        rg->avg_energy = avg_energy;
+    }
+}
+
 void rgain_process(RGainState *rg, int32_t *pcm, uint32_t num_frames) {
     if (rg->mode == RGAIN_OFF) return;
     

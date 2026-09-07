@@ -36,7 +36,10 @@ const char** eq_get_freq_labels(void);
 void eq_save_state(void *file_ptr);
 void eq_load_state_key(const char *key, const char *val);
 
-/* Process interleaved 32-bit PCM in-place with 10 biquads and soft limiter */
+/* 32-bit float DSP */
+void eq_process_float(float *samples_interleaved, uint32_t num_frames, uint16_t num_channels, uint32_t sample_rate);
+
+/* Legacy int32 wrapper */
 void eq_process(int32_t *pcm_interleaved, uint32_t num_frames, uint16_t num_channels, uint32_t sample_rate);
 
 #endif // EQUALIZER_H
