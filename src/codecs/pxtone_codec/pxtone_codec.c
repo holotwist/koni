@@ -171,7 +171,7 @@ static bool pxtn_codec_seek(KoniDecoder* dec, uint64_t target_sample) {
     return pxtn_tiny_seek(dec->pxtn, target_sample);
 }
 
-/* Tracker Interface Implementation */
+// Tracker Interface Implementation 
 
 static uint32_t pxtn_iface_get_num_channels(KoniDecoder *dec) {
     return (dec && dec->pxtn) ? (uint32_t)dec->pxtn->unit_count : 0;

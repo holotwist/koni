@@ -11,6 +11,7 @@
 #include "playlist_manager.h"
 #include "equalizer.h"
 #include "ui_eq.h"
+#include "ui_krystal.h"
 #include <curl/curl.h>
 
 #include <locale.h>
@@ -39,6 +40,7 @@ int main(int argc, char **argv) {
     playlist_mgmt_init(); // Initialize playlists & favourites
     eq_init(); // Initialize 10-band biquad equalizer
     ui_eq_init();
+    ui_krystal_init();
     curl_global_init(CURL_GLOBAL_DEFAULT);
     load_state(); // Load all the previous state
     library_reload(); // Read database tracks into memory

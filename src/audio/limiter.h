@@ -21,7 +21,7 @@ typedef struct {
 void limiter_init(LookaheadLimiter *limiter, uint32_t sample_rate);
 void limiter_reset(LookaheadLimiter *limiter);
 
-/* Applies lookahead true-peak limiting in-place across multichannel buffers */
+// Applies lookahead true-peak limiting in-place across multichannel buffers 
 void limiter_process(LookaheadLimiter *limiter, float *samples_interleaved, uint32_t num_frames, uint16_t num_channels, uint32_t sample_rate);
 
 #endif // LIMITER_H

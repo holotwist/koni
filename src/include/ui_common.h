@@ -35,6 +35,9 @@ void format_list_item(char* out_buf, size_t out_size, int max_w, const char* fil
 int utf8_byte_offset_for_width(const char *str, int target_width);
 int utf8_byte_offset_for_suffix(const char *str, int target_width);
 
+// Playlist UI cache invalidator
+void ui_playlists_invalidate_cache(void);
+
 // Component draw functions
 void draw_files_panel(int y, int x, int h, int w);
 void draw_queue_panel(int y, int x, int h, int w);

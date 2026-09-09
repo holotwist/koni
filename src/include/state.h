@@ -67,7 +67,7 @@ typedef enum {
     REPEAT_ONE
 } RepeatMode;
 
-/* Shared Globals */
+// Shared Globals 
 extern pthread_mutex_t state_mutex;
 
 extern char current_dir[1024];

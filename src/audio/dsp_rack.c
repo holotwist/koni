@@ -1,6 +1,7 @@
 #define _DEFAULT_SOURCE
 #include "dsp_rack.h"
 #include "equalizer.h"
+#include "krystal_engine.h"
 #include "dc_blocker.h"
 #include "limiter.h"
 #include "state.h"
@@ -19,11 +20,13 @@ void dsp_rack_init(void) {
     }
     dc_blocker_init(&s_dc_blocker, 44100);
     limiter_init(&s_limiter, 44100);
+    krystal_init(44100);
 }
 
 void dsp_rack_reset(void) {
     dc_blocker_reset(&s_dc_blocker);
     limiter_reset(&s_limiter);
+    krystal_reset();
     s_current_vol_factor = -1.0f;
 }
 
@@ -46,6 +49,11 @@ void dsp_rack_process(const int32_t *pcm_in, float *float_out, uint32_t num_fram
     if (rgain && rgain_mode != RGAIN_OFF) {
         rgain_set_mode(rgain, (RGainMode)rgain_mode);
         rgain_process_float(rgain, float_out, num_frames);
+    }
+
+    // Krystal Audio Engine
+    if (krystal_is_enabled()) {
+        krystal_process(float_out, num_frames, num_channels, sample_rate, volume_percent);
     }
 
     // 10-Band Graphic Equalizer

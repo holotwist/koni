@@ -252,7 +252,7 @@ const char* db_get_sort_name(DBSortMode mode) {
     }
 }
 
-/* 64 KB Chunked String Arena */
+// 64 KB Chunked String Arena 
 typedef struct StringChunk {
     struct StringChunk *next;
     size_t used;

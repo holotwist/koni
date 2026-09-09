@@ -53,16 +53,20 @@ static uint8_t* base64_decode(const char* src, size_t len, size_t* out_len) {
 }
 
 static char* decode_id3_string(const uint8_t* data, size_t size, uint8_t encoding) {
-    if (size == 0) return strdup("");
+    if (size == 0 || !data) return strdup("");
     if (encoding == 3) { // UTF-8
-        char* str = calloc(1, size + 1);
-        memcpy(str, data, size);
-        return str;
+        size_t actual_len = 0;
+        while (actual_len < size && data[actual_len] != '\0') actual_len++;
+        char* str = calloc(1, actual_len + 1);
+        if (str) memcpy(str, data, actual_len);
+        return str ? str : strdup("");
     } else if (encoding == 0) { // ISO-8859-1 (Latin-1) -> UTF-8
         char* str = calloc(1, size * 2 + 1);
+        if (!str) return strdup("");
         size_t out_idx = 0;
         for (size_t i = 0; i < size; i++) {
             uint8_t b = data[i];
+            if (b == 0) break;
             if (b < 0x80) {
                 str[out_idx++] = (char)b;
             } else {
@@ -70,6 +74,7 @@ static char* decode_id3_string(const uint8_t* data, size_t size, uint8_t encodin
                 str[out_idx++] = (char)(0x80 | (b & 0x3F));
             }
         }
+        str[out_idx] = '\0';
         return str;
     } else if (encoding == 1 || encoding == 2) {
         char* str = calloc(1, size * 2 + 1);

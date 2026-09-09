@@ -8,7 +8,7 @@ void draw_musiclist_panel(int y, int x, int h, int w) {
     if (h < 4 || w < 2) return;
 
     int sort_str_len = (int)strlen(db_get_sort_name(current_library_sort)) + 8;
-    if (w > sort_str_len + 30) {
+    if (w > sort_str_len + 45) {
         attron(A_DIM | COLOR_PAIR(2));
         mvprintw(y, x + w - sort_str_len - 2, "[Sort: %s]", db_get_sort_name(current_library_sort));
         attroff(A_DIM | COLOR_PAIR(2));
@@ -89,9 +89,10 @@ void draw_musiclist_panel(int y, int x, int h, int w) {
             get_marquee_text(formatted_name, text_w, max_disp_len, 0, disp_buf, sizeof(disp_buf));
         }
 
-        int chars_copied = (text_w <= max_disp_len) ? text_w : max_disp_len;
-        mvprintw(start_y + i, x + 2, "%s", disp_buf);
-        for (int p = chars_copied; p < max_disp_len; p++) printw(" ");
+        int disp_w = utf8_display_width(disp_buf);
+        int print_bytes = utf8_byte_offset_for_width(disp_buf, max_disp_len);
+        mvprintw(start_y + i, x + 2, "%.*s", print_bytes, disp_buf);
+        for (int p = disp_w; p < max_disp_len; p++) printw(" ");
 
         if (list_pos == *cur_sel) attroff(A_REVERSE | COLOR_PAIR(1));
         else if (is_playing) attroff(A_BOLD | COLOR_PAIR(4));

@@ -90,6 +90,18 @@ add_executable(koni
     src/playlist/playlist_manager.c
     src/equ/equalizer.c
     src/ui/ui_eq.c
+    src/ui/ui_krystal.c
+    src/audio/krystal/krystal_profiles.c
+    src/audio/krystal/krystal_engine.c
+    src/audio/krystal/krystal_oversample.c
+    src/audio/krystal/krystal_saturator.c
+    src/audio/krystal/krystal_spectral.c
+    src/audio/krystal/krystal_transient.c
+    src/audio/krystal/krystal_meter.c
+    src/audio/krystal/krystal_loudness.c
+    src/audio/krystal/krystal_bass.c
+    src/audio/krystal/krystal_spatial.c
+    src/audio/krystal/krystal_exciter.c
     src/ui/ui_files.c
     src/ui/ui_queue.c
     src/ui/ui_musiclist.c
@@ -116,6 +128,7 @@ target_include_directories(koni PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/audio>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/playlist>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/equ>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/audio/krystal>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/codec_api>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/lyrics_api>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include/extensions_api>

@@ -11,16 +11,17 @@ void draw_files_panel(int y, int x, int h, int w) {
     int start_y = y + 3;
     int list_h = h - 4;
 
-    int max_path_width = w - 3;
+    int max_path_width = w - 4;
+    mvhline(y + 1, x + 1, ' ', w - 2);
     if (max_path_width > 0) {
         int path_width = utf8_display_width(current_dir);
         if (path_width <= max_path_width) {
-            mvprintw(y + 1, x + 1, " %s", current_dir);
+            mvprintw(y + 1, x + 2, "%s", current_dir);
         } else if (max_path_width > 3) {
             int offset = utf8_byte_offset_for_suffix(current_dir, max_path_width - 3);
-            mvprintw(y + 1, x + 1, " ...%s", current_dir + offset);
+            mvprintw(y + 1, x + 2, "...%s", current_dir + offset);
         } else {
-            mvprintw(y + 1, x + 1, " ...");
+            mvprintw(y + 1, x + 2, "...");
         }
     }
     
@@ -93,10 +94,10 @@ void draw_files_panel(int y, int x, int h, int w) {
             get_marquee_text(formatted_name, text_w, max_disp_len, 0, disp_buf, sizeof(disp_buf));
         }
         
-        int chars_copied = (text_w <= max_disp_len) ? text_w : max_disp_len;
-        mvprintw(start_y + i, x + 2, "%s", disp_buf);
-        
-        for (int p = chars_copied; p < max_disp_len; p++) printw(" ");
+        int disp_w = utf8_display_width(disp_buf);
+        int print_bytes = utf8_byte_offset_for_width(disp_buf, max_disp_len);
+        mvprintw(start_y + i, x + 2, "%.*s", print_bytes, disp_buf);
+        for (int p = disp_w; p < max_disp_len; p++) printw(" ");
 
         if (list_pos == *cur_sel) attroff(A_REVERSE | COLOR_PAIR(1));
         else if (is_playing) attroff(A_BOLD | COLOR_PAIR(4));

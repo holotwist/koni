@@ -15,7 +15,7 @@ static const KoniExtension *registered_extensions[] = {
     NULL
 };
 
-/* Host Context Implementation */
+// Host Context Implementation 
 static bool host_is_playing(void) {
     return atomic_load(&play_state_atomic) == STATE_PLAYING;
 }

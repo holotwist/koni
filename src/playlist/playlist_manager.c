@@ -19,7 +19,7 @@ static PlaylistSummary *s_playlists = NULL;
 static int s_num_playlists = 0;
 static int s_playlists_cap = 0;
 
-/* Fast in-memory hash set for Favourites */
+// Fast in-memory hash set for Favourites 
 typedef struct FavNode {
     char *path;
     struct FavNode *next;
@@ -51,27 +51,16 @@ static void fav_cache_clear(void) {
 static void fav_cache_add(const char *path) {
     if (!path || !path[0]) return;
     unsigned int bucket = hash_path(path);
+    FavNode *cur = s_fav_buckets[bucket];
+    while (cur) {
+        if (strcmp(cur->path, path) == 0) return; // Prevent duplicate entries
+        cur = cur->next;
+    }
     FavNode *node = malloc(sizeof(FavNode));
     if (!node) return;
     node->path = strdup(path);
     node->next = s_fav_buckets[bucket];
     s_fav_buckets[bucket] = node;
-}
-
-static void fav_cache_remove(const char *path) {
-    if (!path || !path[0]) return;
-    unsigned int bucket = hash_path(path);
-    FavNode **cur = &s_fav_buckets[bucket];
-    while (*cur) {
-        if (strcmp((*cur)->path, path) == 0) {
-            FavNode *del = *cur;
-            *cur = (*cur)->next;
-            free(del->path);
-            free(del);
-            return;
-        }
-        cur = &(*cur)->next;
-    }
 }
 
 static void ensure_playlists_dir(void) {
@@ -178,6 +167,8 @@ void playlist_mgmt_refresh_list(void) {
     }
 
     reload_favourites_cache();
+    extern void ui_playlists_invalidate_cache(void);
+    ui_playlists_invalidate_cache();
     pthread_mutex_unlock(&s_pl_mutex);
 }
 
@@ -243,7 +234,14 @@ bool playlist_mgmt_toggle_favourite(const char *filepath, const char *title, con
 
         while (fgets(buf, sizeof(buf), f)) {
             buf[strcspn(buf, "\r\n")] = 0;
-            if (strcmp(buf, filepath) == 0) continue; // Skip target
+            if (strcmp(buf, filepath) == 0) {
+                // Drop preceding #EXTINF metadata line
+                if (count > 0 && strncmp(lines[count - 1], "#EXTINF:", 8) == 0) {
+                    free(lines[count - 1]);
+                    count--;
+                }
+                continue;
+            }
             if (count >= cap) {
                 cap *= 2;
                 lines = realloc(lines, sizeof(char*) * cap);
@@ -262,17 +260,11 @@ bool playlist_mgmt_toggle_favourite(const char *filepath, const char *title, con
         }
         free(lines);
 
-        pthread_mutex_lock(&s_pl_mutex);
-        fav_cache_remove(filepath);
-        if (s_num_playlists > 0) s_playlists[0].track_count = count_m3u_tracks(fav_path);
-        pthread_mutex_unlock(&s_pl_mutex);
+        playlist_mgmt_refresh_list();
         return false; // Result is now unfavourited
     } else {
-        // Add track
+        // Add track (playlist_mgmt_add_track already invokes playlist_mgmt_refresh_list())
         playlist_mgmt_add_track(FAVOURITES_NAME, filepath, title, artist, duration_sec);
-        pthread_mutex_lock(&s_pl_mutex);
-        fav_cache_add(filepath);
-        pthread_mutex_unlock(&s_pl_mutex);
         return true; // Result is now favourited
     }
 }
@@ -426,11 +418,17 @@ bool playlist_mgmt_load_playlist(const char *name, LoadedPlaylist *out_pl) {
                 char *artist_track = comma + 1;
                 char *dash = strstr(artist_track, " - ");
                 if (dash) {
-                    size_t a_len = dash - artist_track;
-                    strncpy(pending_artist, artist_track, a_len < sizeof(pending_artist) ? a_len : sizeof(pending_artist) - 1);
+                    size_t a_len = (size_t)(dash - artist_track);
+                    if (a_len >= sizeof(pending_artist)) a_len = sizeof(pending_artist) - 1;
+                    memcpy(pending_artist, artist_track, a_len);
+                    pending_artist[a_len] = '\0';
+
                     strncpy(pending_title, dash + 3, sizeof(pending_title) - 1);
+                    pending_title[sizeof(pending_title) - 1] = '\0';
                 } else {
                     strncpy(pending_title, artist_track, sizeof(pending_title) - 1);
+                    pending_title[sizeof(pending_title) - 1] = '\0';
+                    pending_artist[0] = '\0';
                 }
             }
         } else if (line[0] && line[0] != '#') {
@@ -440,12 +438,15 @@ bool playlist_mgmt_load_playlist(const char *name, LoadedPlaylist *out_pl) {
             }
             PlaylistTrackItem *item = &out_pl->items[out_pl->count++];
             strncpy(item->path, line, sizeof(item->path) - 1);
+            item->path[sizeof(item->path) - 1] = '\0';
             strncpy(item->title, pending_title, sizeof(item->title) - 1);
+            item->title[sizeof(item->title) - 1] = '\0';
             strncpy(item->artist, pending_artist, sizeof(item->artist) - 1);
+            item->artist[sizeof(item->artist) - 1] = '\0';
             item->duration_sec = pending_dur;
 
-            pending_title[0] = '\0';
-            pending_artist[0] = '\0';
+            memset(pending_title, 0, sizeof(pending_title));
+            memset(pending_artist, 0, sizeof(pending_artist));
             pending_dur = 0;
         }
     }

@@ -57,7 +57,8 @@ static const KeybindDefault s_defaults[] = {
     { ACTION_INFO,              "track_info",       "i, I" },
     { ACTION_FAVOURITE,         "favourite",        "*, F" },
     { ACTION_LOCATE_PLAYING,    "locate_playing",   "L" },
-    { ACTION_TOGGLE_EQ,         "equalizer",        "E" }
+    { ACTION_TOGGLE_EQ,         "equalizer",        "E" },
+    { ACTION_TOGGLE_KRYSTAL,    "krystal",          "K" }
 };
 
 void ui_keybinds_init(void) {

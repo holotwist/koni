@@ -12,6 +12,7 @@
 #include "ui_modal.h"
 #include "ui_status.h"
 #include "ui_eq.h"
+#include "ui_krystal.h"
 
 #include <ncurses.h>
 #include <string.h>
@@ -144,8 +145,13 @@ bool ui_handle_input(int ch) {
         return true;
     }
 
-    // Active Equalizer view intercepts navigation
+     // Active Equalizer view intercepts navigation
     if (ui_eq_handle_input(ch)) {
+        return true;
+    }
+
+    // Active Krystal engine view intercepts navigation
+    if (ui_krystal_handle_input(ch)) {
         return true;
     }
 
@@ -293,6 +299,8 @@ bool ui_handle_input(int ch) {
             const char *title = NULL;
             const char *artist = NULL;
             uint32_t dur = 0;
+            char file_path_buf[1024] = {0};
+            char pl_path[1024] = {0}, pl_title[256] = {0}, pl_artist[256] = {0};
 
             if (current_browser_tab == TAB_MUSIC && num_library_tracks > 0) {
                 path = library_tracks[selected_library_idx].path;
@@ -300,9 +308,8 @@ bool ui_handle_input(int ch) {
                 artist = library_tracks[selected_library_idx].artist;
                 dur = library_tracks[selected_library_idx].duration_sec;
             } else if (current_browser_tab == TAB_FILES && num_files > 0 && !files[selected_file_idx].is_dir) {
-                char full[1024];
-                snprintf(full, sizeof(full), "%s/%s", current_dir, files[selected_file_idx].name);
-                path = full;
+                snprintf(file_path_buf, sizeof(file_path_buf), "%s/%s", current_dir, files[selected_file_idx].name);
+                path = file_path_buf;
                 title = files[selected_file_idx].meta.title ? files[selected_file_idx].meta.title : files[selected_file_idx].name;
                 artist = files[selected_file_idx].meta.artist;
                 dur = files[selected_file_idx].duration_sec;
@@ -311,6 +318,18 @@ bool ui_handle_input(int ch) {
                 title = playlist[selected_playlist_idx].meta.title ? playlist[selected_playlist_idx].meta.title : playlist[selected_playlist_idx].name;
                 artist = playlist[selected_playlist_idx].meta.artist;
                 dur = playlist[selected_playlist_idx].duration_sec;
+            } else if (current_browser_tab == TAB_PLAYLISTS && playlist_in_drilldown) {
+                LoadedPlaylist lp;
+                if (playlist_mgmt_load_playlist(active_playlist_name, &lp) && selected_playlist_track_idx < lp.count) {
+                    strncpy(pl_path, lp.items[selected_playlist_track_idx].path, sizeof(pl_path) - 1);
+                    strncpy(pl_title, lp.items[selected_playlist_track_idx].title, sizeof(pl_title) - 1);
+                    strncpy(pl_artist, lp.items[selected_playlist_track_idx].artist, sizeof(pl_artist) - 1);
+                    path = pl_path;
+                    title = pl_title;
+                    artist = pl_artist;
+                    dur = lp.items[selected_playlist_track_idx].duration_sec;
+                }
+                playlist_mgmt_free_loaded(&lp);
             }
 
             if (path) {
@@ -323,6 +342,11 @@ bool ui_handle_input(int ch) {
 
         case ACTION_TOGGLE_EQ:
             ui_eq_toggle();
+            force_redraw = true;
+            break;
+
+        case ACTION_TOGGLE_KRYSTAL:
+            ui_krystal_toggle();
             force_redraw = true;
             break;
 

@@ -1,6 +1,7 @@
 #include "state.h"
 #include "ui_common.h"
 #include "equalizer.h"
+#include "krystal_engine.h"
 
 pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -224,6 +225,7 @@ void load_state(void) {
             else if (strcmp(key, "active_playlist") == 0) strncpy(active_playlist_name, val, sizeof(active_playlist_name)-1);
             else if (strcmp(key, "play_pos_sec") == 0) saved_pos_sec = (uint32_t)atoi(val);
             else if (strncmp(key, "eq_", 3) == 0) eq_load_state_key(key, val);
+            else if (strncmp(key, "krystal_", 8) == 0) krystal_load_state_key(key, val);
         }
     }
     fclose(f);
@@ -299,6 +301,7 @@ void save_state(void) {
     }
 
     eq_save_state(f);
+    krystal_save_state(f);
 
     fclose(f);
     save_playlist_queue();

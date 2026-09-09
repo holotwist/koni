@@ -234,7 +234,7 @@ void eq_load_state_key(const char *key, const char *val) {
     pthread_mutex_unlock(&s_eq_mutex);
 }
 
-/* Soft Limiter, transparent below 0.85, smooth tanh saturation above */
+// Soft Limiter, transparent below 0.85, smooth tanh saturation above 
 static inline float eq_soft_limit(float x) {
     const float threshold = 0.85f;
     if (x > threshold) {

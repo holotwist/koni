@@ -10,6 +10,10 @@
 static LoadedPlaylist s_drilldown_cache = {0};
 static char s_cached_name[128] = {0};
 
+void ui_playlists_invalidate_cache(void) {
+    s_cached_name[0] = '\0';
+}
+
 void draw_playlists_panel(int y, int x, int h, int w) {
     if (h < 4 || w < 2) return;
 
@@ -67,8 +71,9 @@ void draw_playlists_panel(int y, int x, int h, int w) {
             if (pad < 0) pad = 0;
 
             snprintf(line_str, sizeof(line_str), "%s%s%*s %s", prefix, name_buf, pad, "", count_str);
-
-            mvprintw(start_y + i, x + 2, "%-.*s", max_disp_len, line_str);
+            int line_w = utf8_display_width(line_str);
+            mvprintw(start_y + i, x + 2, "%s", line_str);
+            for (int p = line_w; p < max_disp_len; p++) printw(" ");
 
             if (idx == *cur_sel) attroff(A_REVERSE | COLOR_PAIR(1));
             else if (is_active_playing_pl) attroff(A_BOLD | COLOR_PAIR(4));
@@ -145,9 +150,10 @@ void draw_playlists_panel(int y, int x, int h, int w) {
                 get_marquee_text(formatted, text_w, max_disp_len, 0, disp_buf, sizeof(disp_buf));
             }
 
-            int chars_copied = (text_w <= max_disp_len) ? text_w : max_disp_len;
-            mvprintw(start_y + i, x + 2, "%s", disp_buf);
-            for (int p = chars_copied; p < max_disp_len; p++) printw(" ");
+            int disp_w = utf8_display_width(disp_buf);
+            int print_bytes = utf8_byte_offset_for_width(disp_buf, max_disp_len);
+            mvprintw(start_y + i, x + 2, "%.*s", print_bytes, disp_buf);
+            for (int p = disp_w; p < max_disp_len; p++) printw(" ");
 
             if (idx == *cur_sel) attroff(A_REVERSE | COLOR_PAIR(1));
             else if (is_playing) attroff(A_BOLD | COLOR_PAIR(4));
