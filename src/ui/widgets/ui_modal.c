@@ -8,16 +8,19 @@
 #include "krystal_engine.h"
 #include "krystal_preset_manager.h"
 #include "equalizer.h"
+#include "peq.h"
 #include "state.h"
 #include <ncurses.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 typedef enum {
     TEXT_INPUT_CREATE_PLAYLIST = 0,
     TEXT_INPUT_RENAME_PLAYLIST,
     TEXT_INPUT_SAVE_KRYSTAL_PRESET,
-    TEXT_INPUT_RENAME_KRYSTAL_PRESET
+    TEXT_INPUT_RENAME_KRYSTAL_PRESET,
+    TEXT_INPUT_SAVE_PEQ_PRESET
 } TextInputPurpose;
 
 static ModalType s_modal_type = MODAL_NONE;
@@ -86,6 +89,17 @@ void ui_modal_open_eq_presets(void) {
     s_selected_item = (cur >= 0) ? cur : 0;
     s_scroll_offset = 0;
     force_redraw = true;
+}
+
+void ui_modal_open_peq_presets(void) {
+    s_modal_type = MODAL_PEQ_PRESETS;
+    s_selected_item = 0;
+    s_scroll_offset = 0;
+    force_redraw = true;
+}
+
+void ui_modal_open_peq_save(void) {
+    open_text_input("Save PEQ Preset As", "", TEXT_INPUT_SAVE_PEQ_PRESET);
 }
 
 static void open_add_to_playlist_modal(void) {
@@ -381,7 +395,8 @@ static void render_krystal_presets(int max_y, int max_x) {
 static void render_eq_presets(int max_y, int max_x) {
     int total = eq_get_preset_count();
     int w = 44;
-    int h = total + 5;
+    int h = total + 4;
+    if (h > 16) h = 16;
     if (h > max_y - 2) h = max_y - 2;
     int x = (max_x - w) / 2;
     int y = (max_y - h) / 2;
@@ -418,6 +433,53 @@ static void render_eq_presets(int max_y, int max_x) {
     attroff(A_DIM | COLOR_PAIR(2));
 }
 
+static void render_peq_presets(int max_y, int max_x) {
+    int b_count = peq_get_builtin_preset_count();
+    static char u_names[64][128];
+    static char u_paths[64][1024];
+    int u_count = peq_scan_user_presets(u_names, u_paths, 64);
+    int total = b_count + u_count;
+
+    int w = 58;
+    int h = 16;
+    if (h > max_y - 2) h = max_y - 2;
+    int x = (max_x - w) / 2;
+    int y = (max_y - h) / 2;
+
+    draw_modal_box(y, x, h, w, "PEQ Presets & AutoEQ");
+
+    int list_h = h - 4;
+    if (s_selected_item < s_scroll_offset) s_scroll_offset = s_selected_item;
+    if (s_selected_item >= s_scroll_offset + list_h) s_scroll_offset = s_selected_item - list_h + 1;
+
+    for (int i = 0; i < list_h && (i + s_scroll_offset) < total; i++) {
+        int idx = i + s_scroll_offset;
+        char line[64];
+        bool is_builtin = (idx < b_count);
+
+        if (is_builtin) {
+            const PEQPresetDef *def = peq_get_builtin_preset(idx);
+            snprintf(line, sizeof(line), "[Preset] %-40.40s", def->name);
+        } else {
+            snprintf(line, sizeof(line), "[AutoEQ] %-40.40s", u_names[idx - b_count]);
+        }
+
+        if (idx == s_selected_item) {
+            attron(A_REVERSE | COLOR_PAIR(4) | A_BOLD);
+            mvprintw(y + 2 + i, x + 3, " %-50s ", line);
+            attroff(A_REVERSE | COLOR_PAIR(4) | A_BOLD);
+        } else {
+            attron(COLOR_PAIR(is_builtin ? 3 : 2));
+            mvprintw(y + 2 + i, x + 3, "   %-48s ", line);
+            attroff(COLOR_PAIR(is_builtin ? 3 : 2));
+        }
+    }
+
+    attron(A_DIM | COLOR_PAIR(2));
+    mvprintw(y + h - 2, x + 3, "[Enter] Load   [Del] Delete User   [Esc] Cancel");
+    attroff(A_DIM | COLOR_PAIR(2));
+}
+
 void ui_modal_render(int max_y, int max_x) {
     if (s_modal_type == MODAL_NONE) return;
     switch (s_modal_type) {
@@ -428,6 +490,7 @@ void ui_modal_render(int max_y, int max_x) {
         case MODAL_PLAYLIST_ACTIONS: render_playlist_actions(max_y, max_x); break;
         case MODAL_KRYSTAL_PRESETS:  render_krystal_presets(max_y, max_x); break;
         case MODAL_EQ_PRESETS:       render_eq_presets(max_y, max_x); break;
+        case MODAL_PEQ_PRESETS:      render_peq_presets(max_y, max_x); break;
         default: break;
     }
 }
@@ -580,6 +643,17 @@ bool ui_modal_handle_input(int ch) {
                         krystal_set_active_preset_name(s_input_buffer);
                         ui_status_set("Renamed preset: %s", s_input_buffer);
                     }
+                } else if (s_input_purpose == TEXT_INPUT_SAVE_PEQ_PRESET) {
+                    const char *home = getenv("HOME");
+                    if (home) {
+                        char path[1024];
+                        snprintf(path, sizeof(path), "%s/.config/koni/peq/%s.txt", home, s_input_buffer);
+                        if (peq_save_file(path)) {
+                            ui_status_set("Saved PEQ: %s.txt", s_input_buffer);
+                        } else {
+                            ui_status_set("Failed to save PEQ file");
+                        }
+                    }
                 }
             }
             ui_modal_close();
@@ -707,6 +781,52 @@ bool ui_modal_handle_input(int ch) {
             eq_apply_preset(s_selected_item);
             ui_status_set("EQ Preset: %s", eq_get_preset_name(s_selected_item));
             ui_modal_close();
+            return true;
+        }
+        return true;
+    }
+
+    if (s_modal_type == MODAL_PEQ_PRESETS) {
+        int b_count = peq_get_builtin_preset_count();
+        static char u_names[64][128];
+        static char u_paths[64][1024];
+        int u_count = peq_scan_user_presets(u_names, u_paths, 64);
+        int total = b_count + u_count;
+
+        if (ch == KEY_UP || ch == 'k') {
+            if (s_selected_item > 0) s_selected_item--;
+            force_redraw = true;
+            return true;
+        }
+        if (ch == KEY_DOWN || ch == 'j') {
+            if (s_selected_item < total - 1) s_selected_item++;
+            force_redraw = true;
+            return true;
+        }
+        if (ch == 10) { // Load preset
+            if (s_selected_item < b_count) {
+                peq_apply_builtin_preset(s_selected_item);
+                ui_status_set("PEQ: %s", peq_get_builtin_preset(s_selected_item)->name);
+            } else {
+                int u_idx = s_selected_item - b_count;
+                if (peq_load_file(u_paths[u_idx])) {
+                    ui_status_set("Loaded AutoEQ: %s", u_names[u_idx]);
+                } else {
+                    ui_status_set("Failed to parse PEQ file");
+                }
+            }
+            ui_modal_close();
+            return true;
+        }
+        if (ch == KEY_DC || ch == 'd' || ch == 'D') {
+            if (s_selected_item >= b_count) {
+                int u_idx = s_selected_item - b_count;
+                unlink(u_paths[u_idx]);
+                ui_status_set("Deleted: %s", u_names[u_idx]);
+                int new_total = b_count + peq_scan_user_presets(u_names, u_paths, 64);
+                if (s_selected_item >= new_total && s_selected_item > 0) s_selected_item--;
+                force_redraw = true;
+            }
             return true;
         }
         return true;

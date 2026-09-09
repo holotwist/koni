@@ -12,6 +12,7 @@
 #include "equalizer.h"
 #include "ui_eq.h"
 #include "ui_krystal.h"
+#include "krystal_engine.h"
 #include "krystal_preset_manager.h"
 #include <curl/curl.h>
 
@@ -40,6 +41,7 @@ int main(int argc, char **argv) {
     db_init(); // Initialize SQLite cache
     playlist_mgmt_init(); // Initialize playlists & favourites
     eq_init(); // Initialize 10-band biquad equalizer
+    krystal_init(44100); // Initialize Krystal to Bypass default
     ui_eq_init();
     ui_krystal_init();
     krystal_presets_init();

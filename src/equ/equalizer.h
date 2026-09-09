@@ -8,6 +8,11 @@
 #define EQ_MIN_GAIN_DB -12.0f
 #define EQ_MAX_GAIN_DB  12.0f
 
+typedef enum {
+    EQ_MODE_GRAPHIC = 0,
+    EQ_MODE_PARAMETRIC = 1
+} EQMode;
+
 typedef struct {
     const char *name;
     float gains[EQ_NUM_BANDS];
@@ -17,6 +22,10 @@ void eq_init(void);
 bool eq_is_enabled(void);
 void eq_set_enabled(bool enabled);
 void eq_toggle_enabled(void);
+
+EQMode eq_get_mode(void);
+void   eq_set_mode(EQMode mode);
+void   eq_toggle_mode(void);
 
 float eq_get_band_gain(int band_idx);
 void  eq_set_band_gain(int band_idx, float gain_db);

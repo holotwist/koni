@@ -88,6 +88,7 @@ add_executable(koni
     src/database/db.c
     src/database/library_scanner.c
     src/playlist/playlist_manager.c
+    src/equ/peq.c
     src/equ/equalizer.c
     src/ui/ui_eq.c
     src/ui/ui_krystal.c

@@ -18,7 +18,8 @@ static pthread_mutex_t s_krystal_mutex = PTHREAD_MUTEX_INITIALIZER;
 static KrystalConfig s_active_cfg;
 static KrystalTelemetry s_telemetry;
 static uint32_t s_sample_rate = 44100;
-static char s_active_preset_name[64] = "Headphones (Reference)";
+static char s_active_preset_name[64] = "Bypass";
+static bool s_initialized = false;
 
 static KrystalLoudnessState s_loudness;
 static KrystalBassState s_bass;
@@ -36,7 +37,13 @@ static size_t s_dry_buffer_cap = 0;
 void krystal_init(uint32_t sample_rate) {
     pthread_mutex_lock(&s_krystal_mutex);
     s_sample_rate = sample_rate ? sample_rate : 44100;
-    s_active_cfg = *krystal_get_preset_config(KRYSTAL_PROFILE_HEADPHONES_REF);
+
+    if (!s_initialized) {
+        s_active_cfg = *krystal_get_preset_config(KRYSTAL_PROFILE_BYPASS);
+        strncpy(s_active_preset_name, "Bypass", sizeof(s_active_preset_name) - 1);
+        s_initialized = true;
+    }
+
     memset(&s_telemetry, 0, sizeof(s_telemetry));
     s_telemetry.phase_correlation = 1.0f;
 

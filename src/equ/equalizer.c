@@ -1,5 +1,6 @@
 #define _DEFAULT_SOURCE
 #include "equalizer.h"
+#include "peq.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -23,21 +24,30 @@ static const char *s_freq_labels[EQ_NUM_BANDS] = {
 };
 
 static const EQPreset s_presets[] = {
-    { "Flat",        {  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f } },
-    { "Bass Boost",  { +6.0f, +5.0f, +4.0f, +2.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f } },
-    { "Rock",        { +5.0f, +4.0f, +2.0f, -1.0f, -1.0f,  0.0f, +2.0f, +3.0f, +4.0f, +5.0f } },
-    { "Pop",         { -1.0f, +1.0f, +3.0f, +4.0f, +3.0f, +1.0f, -1.0f, -1.0f, +1.0f, +2.0f } },
-    { "Vocal",       { -2.0f, -2.0f, -1.0f, +2.0f, +4.0f, +4.0f, +3.0f, +1.0f,  0.0f, -2.0f } },
-    { "Electronic",  { +5.0f, +4.0f, +2.0f,  0.0f, -1.0f, +2.0f,  0.0f, +1.0f, +4.0f, +5.0f } },
-    { "Classical",   { +4.0f, +3.0f, +2.0f, +1.0f, -1.0f, -1.0f,  0.0f, +2.0f, +3.0f, +3.0f } },
-    { "Acoustic",    { +3.0f, +2.0f, +1.0f, +1.0f, +1.0f, +1.0f, +2.0f, +2.0f, +3.0f, +2.0f } },
-    { "Hardbass",    { +5.0f, +7.0f, +6.0f, +2.0f, -2.0f, -1.0f, +1.0f, +3.0f, +5.0f, +4.0f } }
+    { "Flat",            {  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f } },
+    { "Bass Boost",      { +6.0f, +5.0f, +4.0f, +2.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f } },
+    { "Hardbass",        { +5.0f, +7.0f, +6.0f, +2.0f, -2.0f, -1.0f, +1.0f, +3.0f, +5.0f, +4.0f } },
+    { "EDM / Dance",     { +6.0f, +6.0f, +3.0f,  0.0f, -2.0f, +1.0f, +2.0f, +3.5f, +5.0f, +4.0f } },
+    { "Hip-Hop / Trap",  { +6.5f, +5.5f, +2.0f, -1.5f, -2.0f,  0.0f, +1.5f, +2.5f, +5.0f, +3.5f } },
+    { "Metal",           { +2.0f, +5.0f, +3.0f,  0.0f, -3.0f, -2.0f, +2.0f, +4.0f, +4.0f, +3.0f } },
+    { "Rock",            { +5.0f, +4.0f, +2.0f, -1.0f, -1.0f,  0.0f, +2.0f, +3.0f, +4.0f, +5.0f } },
+    { "Pop",             { -1.0f, +1.0f, +3.0f, +4.0f, +3.0f, +1.0f, -1.0f, -1.0f, +1.0f, +2.0f } },
+    { "Vocaloid / Synth",{ +2.0f, +4.0f, +3.0f, +2.0f, -1.0f, +2.0f, +1.0f, -1.5f, +1.0f, +3.0f } },
+    { "Electronic",      { +5.0f, +4.0f, +2.0f,  0.0f, -1.0f, +2.0f,  0.0f, +1.0f, +4.0f, +5.0f } },
+    { "V-Shape (Smile)", { +4.0f, +5.0f, +3.0f, +1.0f, -2.0f, -2.5f, -1.0f, +1.5f, +4.0f, +4.5f } },
+    { "Lofi / Chill",    { -4.0f, +1.0f, +3.0f, +3.5f, +1.5f,  0.0f, -1.0f, -2.0f, -3.5f, -6.0f } },
+    { "Jazz",            {  0.0f, +2.0f, +3.0f, +1.5f,  0.0f,  0.0f, +1.0f, +2.0f, +2.5f, +1.5f } },
+    { "Acoustic",        { +3.0f, +2.0f, +1.0f, +1.0f, +1.0f, +1.0f, +2.0f, +2.0f, +3.0f, +2.0f } },
+    { "Classical",       { +4.0f, +3.0f, +2.0f, +1.0f, -1.0f, -1.0f,  0.0f, +2.0f, +3.0f, +3.0f } },
+    { "Vocal",           { -2.0f, -2.0f, -1.0f, +2.0f, +4.0f, +4.0f, +3.0f, +1.0f,  0.0f, -2.0f } },
+    { "Podcast",         { -8.0f, -4.0f, -1.0f, -2.0f,  0.0f, +2.5f, +3.5f, +2.0f, -1.5f, -4.0f } }
 };
 
 static const int s_preset_count = (int)(sizeof(s_presets) / sizeof(s_presets[0]));
 
 static pthread_mutex_t s_eq_mutex = PTHREAD_MUTEX_INITIALIZER;
 static bool s_enabled = false;
+static EQMode s_eq_mode = EQ_MODE_GRAPHIC;
 static float s_target_gains[EQ_NUM_BANDS] = {0};
 static float s_current_gains[EQ_NUM_BANDS] = {0};
 static bool s_needs_smoothing = false;
@@ -85,8 +95,10 @@ static void recalculate_coefficients_locked(uint32_t srate) {
 }
 
 void eq_init(void) {
+    peq_init();
     pthread_mutex_lock(&s_eq_mutex);
     s_enabled = false;
+    s_eq_mode = EQ_MODE_GRAPHIC;
     s_current_preset = 0;
     memset(s_target_gains, 0, sizeof(s_target_gains));
     memset(s_current_gains, 0, sizeof(s_current_gains));
@@ -112,6 +124,25 @@ void eq_set_enabled(bool enabled) {
 void eq_toggle_enabled(void) {
     pthread_mutex_lock(&s_eq_mutex);
     s_enabled = !s_enabled;
+    pthread_mutex_unlock(&s_eq_mutex);
+}
+
+EQMode eq_get_mode(void) {
+    pthread_mutex_lock(&s_eq_mutex);
+    EQMode m = s_eq_mode;
+    pthread_mutex_unlock(&s_eq_mutex);
+    return m;
+}
+
+void eq_set_mode(EQMode mode) {
+    pthread_mutex_lock(&s_eq_mutex);
+    s_eq_mode = mode;
+    pthread_mutex_unlock(&s_eq_mutex);
+}
+
+void eq_toggle_mode(void) {
+    pthread_mutex_lock(&s_eq_mutex);
+    s_eq_mode = (s_eq_mode == EQ_MODE_GRAPHIC) ? EQ_MODE_PARAMETRIC : EQ_MODE_GRAPHIC;
     pthread_mutex_unlock(&s_eq_mutex);
 }
 
@@ -197,6 +228,7 @@ void eq_save_state(void *file_ptr) {
     if (!f) return;
     pthread_mutex_lock(&s_eq_mutex);
     fprintf(f, "eq_enabled=%d\n", s_enabled ? 1 : 0);
+    fprintf(f, "eq_mode=%d\n", (int)s_eq_mode);
     fprintf(f, "eq_preset=%d\n", s_current_preset);
     fprintf(f, "eq_gains=");
     for (int i = 0; i < EQ_NUM_BANDS; i++) {
@@ -204,6 +236,7 @@ void eq_save_state(void *file_ptr) {
     }
     fprintf(f, "\n");
     pthread_mutex_unlock(&s_eq_mutex);
+    peq_save_state(file_ptr);
 }
 
 void eq_load_state_key(const char *key, const char *val) {
@@ -211,6 +244,12 @@ void eq_load_state_key(const char *key, const char *val) {
     pthread_mutex_lock(&s_eq_mutex);
     if (strcmp(key, "eq_enabled") == 0) {
         s_enabled = (atoi(val) != 0);
+    } else if (strcmp(key, "eq_mode") == 0) {
+        s_eq_mode = (EQMode)atoi(val);
+    } else if (strncmp(key, "peq_", 4) == 0) {
+        pthread_mutex_unlock(&s_eq_mutex);
+        peq_load_state_key(key, val);
+        return;
     } else if (strcmp(key, "eq_preset") == 0) {
         s_current_preset = atoi(val);
     } else if (strcmp(key, "eq_gains") == 0) {
@@ -256,6 +295,12 @@ void eq_process_float(float *samples_interleaved, uint32_t num_frames, uint16_t 
     pthread_mutex_lock(&s_eq_mutex);
     if (!s_enabled) {
         pthread_mutex_unlock(&s_eq_mutex);
+        return;
+    }
+
+    if (s_eq_mode == EQ_MODE_PARAMETRIC) {
+        pthread_mutex_unlock(&s_eq_mutex);
+        peq_process_float(samples_interleaved, num_frames, num_channels, sample_rate);
         return;
     }
 
