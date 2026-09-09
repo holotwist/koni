@@ -11,7 +11,8 @@ typedef enum {
     MODAL_TEXT_INPUT,
     MODAL_TRACK_DETAILS,
     MODAL_PLAYLIST_ACTIONS,
-    MODAL_KRYSTAL_PRESETS
+    MODAL_KRYSTAL_PRESETS,
+    MODAL_EQ_PRESETS
 } ModalType;
 
 typedef struct {
@@ -34,6 +35,7 @@ void ui_modal_open_track_actions(const ModalTrackContext *ctx);
 void ui_modal_open_playlist_actions(const char *playlist_name);
 void ui_modal_open_krystal_presets(void);
 void ui_modal_open_krystal_save(void);
+void ui_modal_open_eq_presets(void);
 
 // Input handling & rendering
 bool ui_modal_handle_input(int ch);

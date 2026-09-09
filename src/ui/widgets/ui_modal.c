@@ -7,6 +7,7 @@
 #include "playlist_manager.h"
 #include "krystal_engine.h"
 #include "krystal_preset_manager.h"
+#include "equalizer.h"
 #include "state.h"
 #include <ncurses.h>
 #include <string.h>
@@ -77,6 +78,14 @@ void ui_modal_open_krystal_presets(void) {
 
 void ui_modal_open_krystal_save(void) {
     open_text_input("Save Preset As", "", TEXT_INPUT_SAVE_KRYSTAL_PRESET);
+}
+
+void ui_modal_open_eq_presets(void) {
+    s_modal_type = MODAL_EQ_PRESETS;
+    int cur = eq_get_current_preset();
+    s_selected_item = (cur >= 0) ? cur : 0;
+    s_scroll_offset = 0;
+    force_redraw = true;
 }
 
 static void open_add_to_playlist_modal(void) {
@@ -369,6 +378,46 @@ static void render_krystal_presets(int max_y, int max_x) {
     attroff(A_DIM | COLOR_PAIR(2));
 }
 
+static void render_eq_presets(int max_y, int max_x) {
+    int total = eq_get_preset_count();
+    int w = 44;
+    int h = total + 5;
+    if (h > max_y - 2) h = max_y - 2;
+    int x = (max_x - w) / 2;
+    int y = (max_y - h) / 2;
+
+    draw_modal_box(y, x, h, w, "EQ Presets");
+
+    int list_h = h - 4;
+    if (s_selected_item < s_scroll_offset) s_scroll_offset = s_selected_item;
+    if (s_selected_item >= s_scroll_offset + list_h) s_scroll_offset = s_selected_item - list_h + 1;
+
+    int cur_p = eq_get_current_preset();
+
+    for (int i = 0; i < list_h && (i + s_scroll_offset) < total; i++) {
+        int idx = i + s_scroll_offset;
+        const char *name = eq_get_preset_name(idx);
+        bool is_active = (idx == cur_p);
+
+        char line[64];
+        snprintf(line, sizeof(line), "%s %-32.32s", is_active ? "*" : " ", name);
+
+        if (idx == s_selected_item) {
+            attron(A_REVERSE | COLOR_PAIR(4) | A_BOLD);
+            mvprintw(y + 2 + i, x + 3, " %-36s ", line);
+            attroff(A_REVERSE | COLOR_PAIR(4) | A_BOLD);
+        } else {
+            attron(COLOR_PAIR(is_active ? 3 : 2));
+            mvprintw(y + 2 + i, x + 3, "   %-34s ", line);
+            attroff(COLOR_PAIR(is_active ? 3 : 2));
+        }
+    }
+
+    attron(A_DIM | COLOR_PAIR(2));
+    mvprintw(y + h - 2, x + 3, "[Enter] Apply    [Esc] Cancel");
+    attroff(A_DIM | COLOR_PAIR(2));
+}
+
 void ui_modal_render(int max_y, int max_x) {
     if (s_modal_type == MODAL_NONE) return;
     switch (s_modal_type) {
@@ -378,6 +427,7 @@ void ui_modal_render(int max_y, int max_x) {
         case MODAL_TRACK_DETAILS:    render_track_details(max_y, max_x); break;
         case MODAL_PLAYLIST_ACTIONS: render_playlist_actions(max_y, max_x); break;
         case MODAL_KRYSTAL_PRESETS:  render_krystal_presets(max_y, max_x); break;
+        case MODAL_EQ_PRESETS:       render_eq_presets(max_y, max_x); break;
         default: break;
     }
 }
@@ -635,6 +685,28 @@ bool ui_modal_handle_input(int ch) {
             } else {
                 ui_status_set("Cannot rename factory preset");
             }
+            return true;
+        }
+        return true;
+    }
+
+    if (s_modal_type == MODAL_EQ_PRESETS) {
+        int total = eq_get_preset_count();
+
+        if (ch == KEY_UP || ch == 'k') {
+            if (s_selected_item > 0) s_selected_item--;
+            force_redraw = true;
+            return true;
+        }
+        if (ch == KEY_DOWN || ch == 'j') {
+            if (s_selected_item < total - 1) s_selected_item++;
+            force_redraw = true;
+            return true;
+        }
+        if (ch == 10) { // Apply preset
+            eq_apply_preset(s_selected_item);
+            ui_status_set("EQ Preset: %s", eq_get_preset_name(s_selected_item));
+            ui_modal_close();
             return true;
         }
         return true;

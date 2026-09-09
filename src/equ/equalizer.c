@@ -30,7 +30,8 @@ static const EQPreset s_presets[] = {
     { "Vocal",       { -2.0f, -2.0f, -1.0f, +2.0f, +4.0f, +4.0f, +3.0f, +1.0f,  0.0f, -2.0f } },
     { "Electronic",  { +5.0f, +4.0f, +2.0f,  0.0f, -1.0f, +2.0f,  0.0f, +1.0f, +4.0f, +5.0f } },
     { "Classical",   { +4.0f, +3.0f, +2.0f, +1.0f, -1.0f, -1.0f,  0.0f, +2.0f, +3.0f, +3.0f } },
-    { "Acoustic",    { +3.0f, +2.0f, +1.0f, +1.0f, +1.0f, +1.0f, +2.0f, +2.0f, +3.0f, +2.0f } }
+    { "Acoustic",    { +3.0f, +2.0f, +1.0f, +1.0f, +1.0f, +1.0f, +2.0f, +2.0f, +3.0f, +2.0f } },
+    { "Hardbass",    { +5.0f, +7.0f, +6.0f, +2.0f, -2.0f, -1.0f, +1.0f, +3.0f, +5.0f, +4.0f } }
 };
 
 static const int s_preset_count = (int)(sizeof(s_presets) / sizeof(s_presets[0]));

@@ -1,6 +1,7 @@
 #define _DEFAULT_SOURCE
 #include "ui_eq.h"
 #include "equalizer.h"
+#include "ui_modal.h"
 #include "ui_common.h"
 #include "ui_status.h"
 #include <ncurses.h>
@@ -61,7 +62,12 @@ bool ui_eq_handle_input(int ch) {
         return true;
     }
 
-    if (ch == 'p' || ch == 'P') {
+    if (ch == 'P') {
+        ui_modal_open_eq_presets();
+        return true;
+    }
+
+    if (ch == 'p') {
         eq_cycle_preset();
         int cur_p = eq_get_current_preset();
         ui_status_set("EQ Preset: %s", eq_get_preset_name(cur_p));
@@ -209,6 +215,6 @@ void draw_eq_panel(int y, int x, int h, int w) {
 
     // Bottom Controls Help Bar
     attron(A_DIM | COLOR_PAIR(2));
-    mvprintw(y + h - 2, x + 2, "[<-/->] Band  [^/v] Gain (+-1dB)  [P] Preset  [Space] On/Off  [0/R] Reset  [Esc/E] Exit");
+    mvprintw(y + h - 2, x + 2, "[<-/->] Band  [^/v] Gain (+-1dB)  [p] Cycle  [P] List  [Space] On/Off  [0/R] Reset  [Esc/E] Exit");
     attroff(A_DIM | COLOR_PAIR(2));
 }
