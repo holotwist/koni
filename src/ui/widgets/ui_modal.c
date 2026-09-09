@@ -5,6 +5,8 @@
 #include "ui_common.h"
 #include "ui_status.h"
 #include "playlist_manager.h"
+#include "krystal_engine.h"
+#include "krystal_preset_manager.h"
 #include "state.h"
 #include <ncurses.h>
 #include <string.h>
@@ -12,12 +14,15 @@
 
 typedef enum {
     TEXT_INPUT_CREATE_PLAYLIST = 0,
-    TEXT_INPUT_RENAME_PLAYLIST
+    TEXT_INPUT_RENAME_PLAYLIST,
+    TEXT_INPUT_SAVE_KRYSTAL_PRESET,
+    TEXT_INPUT_RENAME_KRYSTAL_PRESET
 } TextInputPurpose;
 
 static ModalType s_modal_type = MODAL_NONE;
 static ModalTrackContext s_track_ctx = {0};
 static char s_target_playlist[128] = {0};
+static char s_target_preset[KRYSTAL_PRESET_NAME_MAX] = {0};
 
 static int s_selected_item = 0;
 static int s_scroll_offset = 0;
@@ -27,6 +32,8 @@ static char s_input_prompt[128] = {0};
 static char s_input_buffer[128] = {0};
 static int s_input_len = 0;
 static TextInputPurpose s_input_purpose = TEXT_INPUT_CREATE_PLAYLIST;
+
+static void open_text_input(const char *prompt, const char *initial, TextInputPurpose purpose);
 
 void ui_modal_init(void) {
     s_modal_type = MODAL_NONE;
@@ -59,6 +66,17 @@ void ui_modal_open_playlist_actions(const char *playlist_name) {
     s_selected_item = 0;
     s_scroll_offset = 0;
     force_redraw = true;
+}
+
+void ui_modal_open_krystal_presets(void) {
+    s_modal_type = MODAL_KRYSTAL_PRESETS;
+    s_selected_item = 0;
+    s_scroll_offset = 0;
+    force_redraw = true;
+}
+
+void ui_modal_open_krystal_save(void) {
+    open_text_input("Save Preset As", "", TEXT_INPUT_SAVE_KRYSTAL_PRESET);
 }
 
 static void open_add_to_playlist_modal(void) {
@@ -308,6 +326,49 @@ static void render_playlist_actions(int max_y, int max_x) {
     attroff(A_DIM | COLOR_PAIR(2));
 }
 
+static void render_krystal_presets(int max_y, int max_x) {
+    int factory_cnt = krystal_get_profile_count();
+    int custom_cnt = krystal_presets_get_count();
+    int total = factory_cnt + custom_cnt;
+
+    int w = 56;
+    int h = 15;
+    int x = (max_x - w) / 2;
+    int y = (max_y - h) / 2;
+
+    draw_modal_box(y, x, h, w, "Krystal Presets");
+
+    int list_h = h - 4;
+    if (s_selected_item < s_scroll_offset) s_scroll_offset = s_selected_item;
+    if (s_selected_item >= s_scroll_offset + list_h) s_scroll_offset = s_selected_item - list_h + 1;
+
+    for (int i = 0; i < list_h && (i + s_scroll_offset) < total; i++) {
+        int idx = i + s_scroll_offset;
+        char line[64];
+        bool is_custom = (idx >= factory_cnt);
+
+        if (!is_custom) {
+            snprintf(line, sizeof(line), "[F] %-42.42s", krystal_get_profile_name(idx));
+        } else {
+            snprintf(line, sizeof(line), "[U] %-42.42s", krystal_presets_get_name(idx - factory_cnt));
+        }
+
+        if (idx == s_selected_item) {
+            attron(A_REVERSE | COLOR_PAIR(4) | A_BOLD);
+            mvprintw(y + 2 + i, x + 3, " %-48s ", line);
+            attroff(A_REVERSE | COLOR_PAIR(4) | A_BOLD);
+        } else {
+            attron(COLOR_PAIR(is_custom ? 3 : 2));
+            mvprintw(y + 2 + i, x + 3, "   %-46s ", line);
+            attroff(COLOR_PAIR(is_custom ? 3 : 2));
+        }
+    }
+
+    attron(A_DIM | COLOR_PAIR(2));
+    mvprintw(y + h - 2, x + 3, "[Enter] Load [S] Save [O] Overwrite [D] Del [Esc]");
+    attroff(A_DIM | COLOR_PAIR(2));
+}
+
 void ui_modal_render(int max_y, int max_x) {
     if (s_modal_type == MODAL_NONE) return;
     switch (s_modal_type) {
@@ -316,6 +377,7 @@ void ui_modal_render(int max_y, int max_x) {
         case MODAL_TEXT_INPUT:       render_text_input(max_y, max_x); break;
         case MODAL_TRACK_DETAILS:    render_track_details(max_y, max_x); break;
         case MODAL_PLAYLIST_ACTIONS: render_playlist_actions(max_y, max_x); break;
+        case MODAL_KRYSTAL_PRESETS:  render_krystal_presets(max_y, max_x); break;
         default: break;
     }
 }
@@ -454,6 +516,20 @@ bool ui_modal_handle_input(int ch) {
                 } else if (s_input_purpose == TEXT_INPUT_RENAME_PLAYLIST) {
                     playlist_mgmt_rename(s_target_playlist, s_input_buffer);
                     ui_status_set("Renamed to %s", s_input_buffer);
+                } else if (s_input_purpose == TEXT_INPUT_SAVE_KRYSTAL_PRESET) {
+                    KrystalConfig cfg;
+                    krystal_get_config(&cfg);
+                    if (krystal_presets_save(s_input_buffer, &cfg)) {
+                        krystal_set_active_preset_name(s_input_buffer);
+                        ui_status_set("Saved preset: %s", s_input_buffer);
+                    } else {
+                        ui_status_set("Failed to save preset");
+                    }
+                } else if (s_input_purpose == TEXT_INPUT_RENAME_KRYSTAL_PRESET) {
+                    if (krystal_presets_rename(s_target_preset, s_input_buffer)) {
+                        krystal_set_active_preset_name(s_input_buffer);
+                        ui_status_set("Renamed preset: %s", s_input_buffer);
+                    }
                 }
             }
             ui_modal_close();
@@ -478,6 +554,87 @@ bool ui_modal_handle_input(int ch) {
     if (s_modal_type == MODAL_TRACK_DETAILS) {
         if (ch == 10 || ch == 27 || ch == 'q' || ch == ' ') {
             ui_modal_close();
+            return true;
+        }
+        return true;
+    }
+
+    if (s_modal_type == MODAL_KRYSTAL_PRESETS) {
+        int factory_cnt = krystal_get_profile_count();
+        int custom_cnt = krystal_presets_get_count();
+        int total = factory_cnt + custom_cnt;
+
+        if (ch == KEY_UP || ch == 'k') {
+            if (s_selected_item > 0) s_selected_item--;
+            force_redraw = true;
+            return true;
+        }
+        if (ch == KEY_DOWN || ch == 'j') {
+            if (s_selected_item < total - 1) s_selected_item++;
+            force_redraw = true;
+            return true;
+        }
+        if (ch == 10) { // Load preset
+            if (s_selected_item < factory_cnt) {
+                krystal_apply_profile(s_selected_item);
+                ui_status_set("Preset: %s", krystal_get_profile_name(s_selected_item));
+            } else {
+                int c_idx = s_selected_item - factory_cnt;
+                KrystalConfig cfg;
+                if (krystal_presets_get_config(c_idx, &cfg)) {
+                    krystal_set_config(&cfg);
+                    krystal_set_active_preset_name(krystal_presets_get_name(c_idx));
+                    ui_status_set("Preset: %s", krystal_presets_get_name(c_idx));
+                }
+            }
+            ui_modal_close();
+            return true;
+        }
+        if (ch == 's' || ch == 'S' || ch == 'a' || ch == '+') {
+            open_text_input("Save Preset As", "", TEXT_INPUT_SAVE_KRYSTAL_PRESET);
+            return true;
+        }
+        if (ch == 'd' || ch == 'D' || ch == KEY_DC || ch == 'x') {
+            if (s_selected_item >= factory_cnt) {
+                int c_idx = s_selected_item - factory_cnt;
+                const char *name = krystal_presets_get_name(c_idx);
+                char del_name[KRYSTAL_PRESET_NAME_MAX];
+                strncpy(del_name, name, sizeof(del_name) - 1);
+                del_name[sizeof(del_name) - 1] = '\0';
+                krystal_presets_delete(del_name);
+                ui_status_set("Deleted preset: %s", del_name);
+                int new_total = factory_cnt + krystal_presets_get_count();
+                if (s_selected_item >= new_total && s_selected_item > 0) s_selected_item--;
+                force_redraw = true;
+            } else {
+                ui_status_set("Cannot delete factory preset");
+            }
+            return true;
+        }
+        if (ch == 'o' || ch == 'O') {
+            if (s_selected_item >= factory_cnt) {
+                int c_idx = s_selected_item - factory_cnt;
+                const char *name = krystal_presets_get_name(c_idx);
+                KrystalConfig cfg;
+                krystal_get_config(&cfg);
+                krystal_presets_save(name, &cfg);
+                krystal_set_active_preset_name(name);
+                ui_status_set("Overwrote preset: %s", name);
+                ui_modal_close();
+            } else {
+                ui_status_set("Cannot overwrite factory preset");
+            }
+            return true;
+        }
+        if (ch == 'r' || ch == 'R') {
+            if (s_selected_item >= factory_cnt) {
+                int c_idx = s_selected_item - factory_cnt;
+                const char *name = krystal_presets_get_name(c_idx);
+                strncpy(s_target_preset, name, sizeof(s_target_preset) - 1);
+                open_text_input("Rename Preset", name, TEXT_INPUT_RENAME_KRYSTAL_PRESET);
+            } else {
+                ui_status_set("Cannot rename factory preset");
+            }
             return true;
         }
         return true;

@@ -3,6 +3,7 @@
 #include "output_device.h"
 #include "stream_reader.h"
 #include "dsp_rack.h"
+#include "krystal_engine.h"
 #include "state.h"
 
 #include <stdio.h>
@@ -325,6 +326,7 @@ void *audio_thread_func(void *arg) {
 
     free(interleaved);
     free(float_output);
+    krystal_shutdown();
     output_device_uninit();
     return NULL;
 }

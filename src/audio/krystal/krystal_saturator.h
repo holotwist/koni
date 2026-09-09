@@ -23,6 +23,7 @@ typedef struct {
 
 void krystal_saturator_init(KrystalSaturatorState *state, uint32_t sample_rate);
 void krystal_saturator_reset(KrystalSaturatorState *state);
+void krystal_saturator_free(KrystalSaturatorState *state);
 
 float krystal_saturator_process(KrystalSaturatorState *state, float *samples, uint32_t num_frames,
                                uint16_t num_channels, const KrystalSatConfig *cfg, uint32_t sample_rate);

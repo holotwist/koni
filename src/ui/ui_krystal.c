@@ -1,6 +1,7 @@
 #define _DEFAULT_SOURCE
 #include "ui_krystal.h"
 #include "krystal_engine.h"
+#include "ui_modal.h"
 #include "ui_common.h"
 #include "ui_status.h"
 #include <ncurses.h>
@@ -371,12 +372,20 @@ bool ui_krystal_handle_input(int ch) {
         return true;
     }
 
-    if (ch == 'p' || ch == 'P') {
+    if (ch == 'P') {
+        ui_modal_open_krystal_presets();
+        return true;
+    }
+
+    if (ch == 'p') {
         krystal_cycle_profile();
-        KrystalConfig cfg;
-        krystal_get_config(&cfg);
-        ui_status_set("Profile: %s", krystal_get_profile_name(cfg.active_profile));
+        ui_status_set("Profile: %s", krystal_get_active_preset_name());
         force_redraw = true;
+        return true;
+    }
+
+    if (ch == 's' || ch == 'S') {
+        ui_modal_open_krystal_save();
         return true;
     }
 
@@ -539,7 +548,7 @@ void draw_krystal_panel(int y, int x, int h, int w) {
     krystal_get_telemetry(&telem);
 
     bool enabled = cfg.master_enabled;
-    const char *prof_name = krystal_get_profile_name(cfg.active_profile);
+    const char *prof_name = krystal_get_active_preset_name();
 
     char box_title[64];
     snprintf(box_title, sizeof(box_title), "Krystal DSP [%s]", enabled ? "ACTIVE" : "BYPASS");
@@ -721,6 +730,6 @@ void draw_krystal_panel(int y, int x, int h, int w) {
 
     int f_y = y + h - 1;
     attron(COLOR_PAIR(2) | A_DIM);
-    mvprintw(f_y, x + 2, " [Tab/H/L] Sec  [↑/↓] Row  [←/→] Adj  [M] 3D Arena  [Space] On/Off  [Esc] Exit ");
+    mvprintw(f_y, x + 2, " [P] Presets  [S] Save  [Tab/H/L] Sec  [↑/↓] Row  [←/→] Adj  [M] 3D  [Space] On/Off  [Esc] Exit ");
     attroff(COLOR_PAIR(2) | A_DIM);
 }

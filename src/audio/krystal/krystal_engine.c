@@ -18,6 +18,7 @@ static pthread_mutex_t s_krystal_mutex = PTHREAD_MUTEX_INITIALIZER;
 static KrystalConfig s_active_cfg;
 static KrystalTelemetry s_telemetry;
 static uint32_t s_sample_rate = 44100;
+static char s_active_preset_name[64] = "Headphones (Reference)";
 
 static KrystalLoudnessState s_loudness;
 static KrystalBassState s_bass;
@@ -30,12 +31,19 @@ static KrystalMeterState s_meter;
 static float *s_dry_buffer = NULL;
 static size_t s_dry_buffer_cap = 0;
 
+#define KRYSTAL_DRY_BUF_CAP (16384 * KRYSTAL_MAX_CHANNELS)
+
 void krystal_init(uint32_t sample_rate) {
     pthread_mutex_lock(&s_krystal_mutex);
     s_sample_rate = sample_rate ? sample_rate : 44100;
     s_active_cfg = *krystal_get_preset_config(KRYSTAL_PROFILE_HEADPHONES_REF);
     memset(&s_telemetry, 0, sizeof(s_telemetry));
     s_telemetry.phase_correlation = 1.0f;
+
+    if (!s_dry_buffer) {
+        s_dry_buffer = malloc(KRYSTAL_DRY_BUF_CAP * sizeof(float));
+        s_dry_buffer_cap = s_dry_buffer ? KRYSTAL_DRY_BUF_CAP : 0;
+    }
 
     krystal_bass_init(&s_bass, s_sample_rate);
     krystal_spatial_init(&s_spatial, s_sample_rate);
@@ -44,6 +52,17 @@ void krystal_init(uint32_t sample_rate) {
     krystal_spectral_init(&s_spectral, s_sample_rate);
     krystal_transient_init(&s_transient, s_sample_rate);
     krystal_meter_init(&s_meter, s_sample_rate);
+    pthread_mutex_unlock(&s_krystal_mutex);
+}
+
+void krystal_shutdown(void) {
+    pthread_mutex_lock(&s_krystal_mutex);
+    if (s_dry_buffer) {
+        free(s_dry_buffer);
+        s_dry_buffer = NULL;
+        s_dry_buffer_cap = 0;
+    }
+    krystal_saturator_free(&s_saturator);
     pthread_mutex_unlock(&s_krystal_mutex);
 }
 
@@ -91,7 +110,8 @@ void krystal_set_config(const KrystalConfig *cfg) {
     if (!cfg) return;
     pthread_mutex_lock(&s_krystal_mutex);
     s_active_cfg = *cfg;
-    s_active_cfg.active_profile = -1; // Flag as Custom
+    s_active_cfg.active_profile = -1;
+    strncpy(s_active_preset_name, "Custom", sizeof(s_active_preset_name) - 1);
     pthread_mutex_unlock(&s_krystal_mutex);
 }
 
@@ -99,6 +119,7 @@ void krystal_apply_profile(int profile_idx) {
     if (profile_idx < 0 || profile_idx >= krystal_get_profile_count()) return;
     pthread_mutex_lock(&s_krystal_mutex);
     s_active_cfg = *krystal_get_preset_config(profile_idx);
+    strncpy(s_active_preset_name, krystal_get_profile_name(profile_idx), sizeof(s_active_preset_name) - 1);
     pthread_mutex_unlock(&s_krystal_mutex);
 }
 
@@ -106,6 +127,22 @@ void krystal_cycle_profile(void) {
     pthread_mutex_lock(&s_krystal_mutex);
     int next = (s_active_cfg.active_profile + 1) % krystal_get_profile_count();
     s_active_cfg = *krystal_get_preset_config(next);
+    strncpy(s_active_preset_name, krystal_get_profile_name(next), sizeof(s_active_preset_name) - 1);
+    pthread_mutex_unlock(&s_krystal_mutex);
+}
+
+const char* krystal_get_active_preset_name(void) {
+    pthread_mutex_lock(&s_krystal_mutex);
+    const char *name = s_active_preset_name;
+    pthread_mutex_unlock(&s_krystal_mutex);
+    return name;
+}
+
+void krystal_set_active_preset_name(const char *name) {
+    if (!name || !name[0]) return;
+    pthread_mutex_lock(&s_krystal_mutex);
+    strncpy(s_active_preset_name, name, sizeof(s_active_preset_name) - 1);
+    s_active_preset_name[sizeof(s_active_preset_name) - 1] = '\0';
     pthread_mutex_unlock(&s_krystal_mutex);
 }
 
@@ -137,12 +174,7 @@ void krystal_process(float *samples_interleaved, uint32_t num_frames, uint16_t n
     pthread_mutex_unlock(&s_krystal_mutex);
 
     size_t total_samples = (size_t)num_frames * (size_t)num_channels;
-    if (total_samples > s_dry_buffer_cap) {
-        free(s_dry_buffer);
-        s_dry_buffer = malloc(total_samples * sizeof(float));
-        s_dry_buffer_cap = s_dry_buffer ? total_samples : 0;
-    }
-    if (s_dry_buffer) {
+    if (s_dry_buffer && total_samples <= s_dry_buffer_cap) {
         memcpy(s_dry_buffer, samples_interleaved, total_samples * sizeof(float));
     }
 

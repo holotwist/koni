@@ -4,11 +4,15 @@
 #include <string.h>
 #include <math.h>
 
+#define SAT_OS_BUF_CAP (16384 * 2 * KRYSTAL_MAX_CHANNELS)
+
 void krystal_saturator_init(KrystalSaturatorState *state, uint32_t sample_rate) {
     if (!state) return;
     memset(state, 0, sizeof(KrystalSaturatorState));
     state->sample_rate = sample_rate ? sample_rate : 44100;
     krystal_oversampler_init(&state->oversampler);
+    state->buf_2x = malloc(SAT_OS_BUF_CAP * sizeof(float));
+    state->buf_2x_cap = state->buf_2x ? SAT_OS_BUF_CAP : 0;
 }
 
 void krystal_saturator_reset(KrystalSaturatorState *state) {
@@ -17,6 +21,15 @@ void krystal_saturator_reset(KrystalSaturatorState *state) {
     memset(state->dc_state, 0, sizeof(state->dc_state));
     memset(state->hysteresis, 0, sizeof(state->hysteresis));
     memset(state->tone_state, 0, sizeof(state->tone_state));
+}
+
+void krystal_saturator_free(KrystalSaturatorState *state) {
+    if (!state) return;
+    if (state->buf_2x) {
+        free(state->buf_2x);
+        state->buf_2x = NULL;
+        state->buf_2x_cap = 0;
+    }
 }
 
 static inline float sat_triode(float x, float drive, float bias) {
@@ -75,12 +88,7 @@ float krystal_saturator_process(KrystalSaturatorState *state, float *samples, ui
 
     if (use_os) {
         size_t needed = (size_t)proc_frames * (size_t)channels;
-        if (needed > state->buf_2x_cap) {
-            free(state->buf_2x);
-            state->buf_2x = malloc(needed * sizeof(float));
-            state->buf_2x_cap = state->buf_2x ? needed : 0;
-        }
-        if (!state->buf_2x) return 0.0f;
+        if (!state->buf_2x || needed > state->buf_2x_cap) return 0.0f;
         krystal_oversample_up(&state->oversampler, samples, state->buf_2x, num_frames, channels);
         proc_buf = state->buf_2x;
     }

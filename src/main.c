@@ -12,6 +12,7 @@
 #include "equalizer.h"
 #include "ui_eq.h"
 #include "ui_krystal.h"
+#include "krystal_preset_manager.h"
 #include <curl/curl.h>
 
 #include <locale.h>
@@ -41,6 +42,7 @@ int main(int argc, char **argv) {
     eq_init(); // Initialize 10-band biquad equalizer
     ui_eq_init();
     ui_krystal_init();
+    krystal_presets_init();
     curl_global_init(CURL_GLOBAL_DEFAULT);
     load_state(); // Load all the previous state
     library_reload(); // Read database tracks into memory
@@ -78,6 +80,7 @@ int main(int argc, char **argv) {
     library_scanner_shutdown();
     save_state(); // Dump state before exiting
     config_save(); // Save configuration
+    krystal_presets_shutdown();
     file_list_shutdown();
     playlist_mgmt_shutdown();
     db_shutdown();

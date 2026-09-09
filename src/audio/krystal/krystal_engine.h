@@ -7,6 +7,7 @@
 
 void krystal_init(uint32_t sample_rate);
 void krystal_reset(void);
+void krystal_shutdown(void);
 
 bool krystal_is_enabled(void);
 void krystal_set_enabled(bool enabled);
@@ -16,6 +17,8 @@ void krystal_get_config(KrystalConfig *out_cfg);
 void krystal_set_config(const KrystalConfig *cfg);
 void krystal_apply_profile(int profile_idx);
 void krystal_cycle_profile(void);
+const char* krystal_get_active_preset_name(void);
+void krystal_set_active_preset_name(const char *name);
 
 void krystal_get_telemetry(KrystalTelemetry *out_telem);
 

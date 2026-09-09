@@ -93,6 +93,7 @@ add_executable(koni
     src/ui/ui_krystal.c
     src/audio/krystal/krystal_profiles.c
     src/audio/krystal/krystal_engine.c
+    src/audio/krystal/krystal_preset_manager.c
     src/audio/krystal/krystal_oversample.c
     src/audio/krystal/krystal_saturator.c
     src/audio/krystal/krystal_spectral.c
