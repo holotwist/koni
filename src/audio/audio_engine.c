@@ -14,8 +14,25 @@
 
 #define CHUNK_FRAMES 16384
 
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#include <xmmintrin.h>
+#include <pmmintrin.h>
+#endif
+
 void *audio_thread_func(void *arg) {
     (void)arg;
+
+    // Flush denormals to zero at hardware level for audio thread
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+    _MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
+#elif defined(__aarch64__)
+    uint64_t fpcr;
+    __asm__ __volatile__("mrs %0, fpcr" : "=r"(fpcr));
+    fpcr |= (1 << 24); // Set FZ (Flush-to-zero) bit
+    __asm__ __volatile__("msr fpcr, %0" : : "r"(fpcr));
+#endif
+
     struct timespec sleep_ts = {0, 20000000L}; // 20ms
 
     dsp_rack_init();

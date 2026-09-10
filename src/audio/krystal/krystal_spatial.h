@@ -42,6 +42,18 @@ typedef struct {
     float air_damp_l;
     float air_damp_r;
 
+    // 2-Stage Schroeder All-Pass Diffusers & Damping for Early Reflections
+    float diff1_buf_l[167];
+    float diff2_buf_l[257];
+    float diff1_buf_r[197];
+    float diff2_buf_r[283];
+    uint32_t diff1_idx_l;
+    uint32_t diff2_idx_l;
+    uint32_t diff1_idx_r;
+    uint32_t diff2_idx_r;
+    float refl_damp_l;
+    float refl_damp_r;
+
     float smoothed_azimuth;
     float smoothed_elevation;
     float smoothed_distance;

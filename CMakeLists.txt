@@ -13,7 +13,7 @@ endif()
 find_package(CURL REQUIRED)
 find_package(SQLite3 REQUIRED)
 
-add_compile_options(-O3 -flto -ffast-math -funroll-loops -Wall -Wextra)
+add_compile_options(-O3 -flto -fno-math-errno -funroll-loops -Wall -Wextra)
 add_compile_definitions(NDEBUG)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|amd64|AMD64|i686|i386|x86)")

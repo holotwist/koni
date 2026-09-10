@@ -8,8 +8,8 @@
 
 typedef struct {
     float b0, b1, b2, a1, a2;
-    float s1[KRYSTAL_MAX_CHANNELS];
-    float s2[KRYSTAL_MAX_CHANNELS];
+    double s1[KRYSTAL_MAX_CHANNELS];
+    double s2[KRYSTAL_MAX_CHANNELS];
 } KrystalBiquad;
 
 typedef enum {

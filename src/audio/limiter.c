@@ -3,6 +3,10 @@
 #include <math.h>
 #include <string.h>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 void limiter_init(LookaheadLimiter *limiter, uint32_t sample_rate) {
     if (!limiter) return;
     memset(limiter, 0, sizeof(LookaheadLimiter));
@@ -10,7 +14,7 @@ void limiter_init(LookaheadLimiter *limiter, uint32_t sample_rate) {
     if (sample_rate == 0) sample_rate = 44100;
     limiter->sample_rate = sample_rate;
 
-    // Standard broadcast true-peak ceiling, -0.2 dBFS (~0.9772f)
+    // Standard broadcast true-peak ceiling: -0.2 dBFS (~0.9772f)
     limiter->ceiling = 0.9772f;
     limiter->current_gain = 1.0f;
 
@@ -18,12 +22,36 @@ void limiter_init(LookaheadLimiter *limiter, uint32_t sample_rate) {
         limiter->gain_buf[i] = 1.0f;
     }
 
-    // Attack time matched to the lookahead delay (~2.1 ms at 44.1 kHz)
+    // Attack envelope, ramps down within lookahead window (~2.1 ms)
     limiter->alpha_attack = 1.0f - expf(-3.0f / (float)LIMITER_LOOKAHEAD_FRAMES);
 
-    // 50ms exponential release curve
+    // 50ms exponential release recovery curve
     const float release_sec = 0.050f;
     limiter->alpha_release = 1.0f - expf(-1.0f / ((float)sample_rate * release_sec));
+
+    // Design ITU-R BS.1770 compliant 4x polyphase sinc interpolation coefficients
+    for (int p = 0; p < 4; p++) {
+        float phase_offset = (float)p * 0.25f;
+        float sum = 0.0f;
+
+        for (int k = 0; k < LIMITER_POLYPHASE_TAPS; k++) {
+            float t = ((float)k - 3.5f) + phase_offset;
+            float sinc = (fabsf(t) < 1.0e-5f) ? 1.0f : sinf((float)M_PI * t) / ((float)M_PI * t);
+            // Blackman-Harris window
+            float w = 0.35875f - 0.48829f * cosf(2.0f * (float)M_PI * ((float)k + 0.5f) / 8.0f)
+                               + 0.14128f * cosf(4.0f * (float)M_PI * ((float)k + 0.5f) / 8.0f)
+                               - 0.01168f * cosf(6.0f * (float)M_PI * ((float)k + 0.5f) / 8.0f);
+            limiter->fir_phases[p][k] = sinc * w;
+            sum += limiter->fir_phases[p][k];
+        }
+
+        // Normalize unity DC gain per polyphase branch
+        if (fabsf(sum) > 1.0e-6f) {
+            for (int k = 0; k < LIMITER_POLYPHASE_TAPS; k++) {
+                limiter->fir_phases[p][k] /= sum;
+            }
+        }
+    }
 }
 
 void limiter_reset(LookaheadLimiter *limiter) {
@@ -51,14 +79,28 @@ void limiter_process(LookaheadLimiter *limiter, float *samples_interleaved, uint
     for (uint32_t f = 0; f < num_frames; f++) {
         uint32_t base = f * num_channels;
 
-        // Linked multi-channel peak detection
+        // Update 4x oversampled true-peak history buffer
+        uint32_t h_idx = limiter->hist_idx;
+        for (uint16_t c = 0; c < channels; c++) {
+            limiter->peak_history[c][h_idx] = samples_interleaved[base + c];
+        }
+        limiter->hist_idx = (h_idx + 1) % LIMITER_POLYPHASE_TAPS;
+
+        // 4x Polyphase True Peak detection across all channels
         float peak = 0.0f;
         for (uint16_t c = 0; c < channels; c++) {
-            float val = fabsf(samples_interleaved[base + c]);
-            if (val > peak) peak = val;
+            for (int p = 0; p < 4; p++) {
+                float interpolated = 0.0f;
+                for (int k = 0; k < LIMITER_POLYPHASE_TAPS; k++) {
+                    uint32_t tap_idx = (limiter->hist_idx + k) % LIMITER_POLYPHASE_TAPS;
+                    interpolated += limiter->fir_phases[p][k] * limiter->peak_history[c][tap_idx];
+                }
+                float abs_interp = fabsf(interpolated);
+                if (abs_interp > peak) peak = abs_interp;
+            }
         }
 
-        // Compute instantaneous required target gain
+        // Target gain computed from reconstructed inter-sample analog peak
         float target_gain = (peak > ceiling) ? (ceiling / peak) : 1.0f;
 
         // Store incoming frame and target gain into lookahead circular buffers

@@ -10,9 +10,9 @@
 #define EQ_MAX_CHANNELS 8
 
 typedef struct {
-    float b0, b1, b2, a1, a2;
-    float s1[EQ_MAX_CHANNELS];
-    float s2[EQ_MAX_CHANNELS];
+    double b0, b1, b2, a1, a2;
+    double s1[EQ_MAX_CHANNELS];
+    double s2[EQ_MAX_CHANNELS];
 } BiquadBand;
 
 static const float s_frequencies[EQ_NUM_BANDS] = {
@@ -57,26 +57,26 @@ static BiquadBand s_filters[EQ_NUM_BANDS];
 
 static void compute_biquad_coefficients(BiquadBand *filter, float f0, float gain_db, uint32_t srate) {
     if (fabsf(gain_db) < 0.05f || f0 >= (float)srate * 0.49f) {
-        filter->b0 = 1.0f;
-        filter->b1 = 0.0f;
-        filter->b2 = 0.0f;
-        filter->a1 = 0.0f;
-        filter->a2 = 0.0f;
+        filter->b0 = 1.0;
+        filter->b1 = 0.0;
+        filter->b2 = 0.0;
+        filter->a1 = 0.0;
+        filter->a2 = 0.0;
         return;
     }
 
-    const float Q = 1.4142f; // ~1-octave bandwidth
-    float A = powf(10.0f, gain_db / 40.0f);
-    float w0 = 2.0f * (float)M_PI * (f0 / (float)srate);
-    float alpha = sinf(w0) / (2.0f * Q);
-    float cos_w = cosf(w0);
+    const double Q = 1.4142135623730951; // ~1-octave bandwidth
+    double A = pow(10.0, (double)gain_db / 40.0);
+    double w0 = 2.0 * M_PI * ((double)f0 / (double)srate);
+    double alpha = sin(w0) / (2.0 * Q);
+    double cos_w = cos(w0);
 
-    float b0 = 1.0f + alpha * A;
-    float b1 = -2.0f * cos_w;
-    float b2 = 1.0f - alpha * A;
-    float a0 = 1.0f + alpha / A;
-    float a1 = -2.0f * cos_w;
-    float a2 = 1.0f - alpha / A;
+    double b0 = 1.0 + alpha * A;
+    double b1 = -2.0 * cos_w;
+    double b2 = 1.0 - alpha * A;
+    double a0 = 1.0 + alpha / A;
+    double a1 = -2.0 * cos_w;
+    double a2 = 1.0 - alpha / A;
 
     filter->b0 = b0 / a0;
     filter->b1 = b1 / a0;
@@ -340,17 +340,17 @@ void eq_process_float(float *samples_interleaved, uint32_t num_frames, uint16_t 
             uint32_t base = (frames_processed + f) * num_channels;
 
             for (uint16_t c = 0; c < channels; c++) {
-                float x = samples_interleaved[base + c];
+                double x = (double)samples_interleaved[base + c];
 
                 for (int b = 0; b < EQ_NUM_BANDS; b++) {
                     BiquadBand *filter = &s_filters[b];
-                    float y = filter->b0 * x + filter->s1[c];
+                    double y = filter->b0 * x + filter->s1[c];
                     filter->s1[c] = filter->b1 * x - filter->a1 * y + filter->s2[c];
                     filter->s2[c] = filter->b2 * x - filter->a2 * y;
                     x = y;
                 }
 
-                samples_interleaved[base + c] = x;
+                samples_interleaved[base + c] = (float)x;
             }
         }
 
@@ -393,10 +393,25 @@ void eq_process(int32_t *pcm_interleaved, uint32_t num_frames, uint16_t num_chan
             // Soft Limiter to prevent clipping
             x = eq_soft_limit(x);
 
-            long long val64 = (long long)(x * 2147483647.0f);
-            if (val64 > 2147483647LL) val64 = 2147483647LL;
-            else if (val64 < -2147483648LL) val64 = -2147483648LL;
-            pcm_interleaved[base + c] = (int32_t)val64;
+            // Fast xorshift32 PRNG for TPDF dither
+            static uint32_t s_dither_state = 0x12345678;
+            s_dither_state ^= s_dither_state << 13;
+            s_dither_state ^= s_dither_state >> 17;
+            s_dither_state ^= s_dither_state << 5;
+            float r1 = (float)(int32_t)s_dither_state * (1.0f / 2147483648.0f);
+
+            s_dither_state ^= s_dither_state << 13;
+            s_dither_state ^= s_dither_state >> 17;
+            s_dither_state ^= s_dither_state << 5;
+            float r2 = (float)(int32_t)s_dither_state * (1.0f / 2147483648.0f);
+
+            // 1 LSB triangular dither at 32-bit boundary
+            float dither = (r1 - r2);
+            double scaled = ((double)x * 2147483647.0) + (double)dither;
+
+            if (scaled > 2147483647.0) scaled = 2147483647.0;
+            else if (scaled < -2147483648.0) scaled = -2147483648.0;
+            pcm_interleaved[base + c] = (int32_t)round(scaled);
         }
     }
 

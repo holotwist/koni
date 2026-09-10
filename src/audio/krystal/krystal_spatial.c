@@ -135,6 +135,15 @@ static inline float read_delay_hermite(const float *ring, float delay_samples, u
     return ((c3 * frac + c2) * frac + c1) * frac + c0;
 }
 
+static inline float allpass_step(float in, float *buf, uint32_t size, uint32_t *idx, float g) {
+    float buf_out = buf[*idx];
+    float w = in + g * buf_out;
+    float out = -g * w + buf_out;
+    buf[*idx] = w;
+    *idx = (*idx + 1) % size;
+    return out;
+}
+
 void krystal_spatial_init(KrystalSpatialState *state, uint32_t sample_rate) {
     if (!state) return;
     memset(state, 0, sizeof(KrystalSpatialState));
@@ -301,16 +310,29 @@ void krystal_spatial_process(KrystalSpatialState *state, float *samples, uint32_
             state->write_idx = (wpos + 1) & (SPATIAL_RING_SIZE - 1);
 
             if (refl > 0.001f) {
-                float refl_l = read_delay_hermite(state->refl_ring_l, er_d1, wpos) * 0.40f
-                             + read_delay_hermite(state->refl_ring_r, er_d2, wpos) * 0.25f
-                             + read_delay_hermite(state->refl_ring_l, er_d3, wpos) * 0.15f;
+                // Multi-tap room specular arrival
+                float refl_raw_l = read_delay_hermite(state->refl_ring_l, er_d1, wpos) * 0.45f
+                                 + read_delay_hermite(state->refl_ring_r, er_d2, wpos) * 0.30f
+                                 + read_delay_hermite(state->refl_ring_l, er_d3, wpos) * 0.20f;
 
-                float refl_r = read_delay_hermite(state->refl_ring_r, er_d1, wpos) * 0.40f
-                             + read_delay_hermite(state->refl_ring_l, er_d2, wpos) * 0.25f
-                             + read_delay_hermite(state->refl_ring_r, er_d3, wpos) * 0.15f;
+                float refl_raw_r = read_delay_hermite(state->refl_ring_r, er_d1, wpos) * 0.45f
+                                 + read_delay_hermite(state->refl_ring_l, er_d2, wpos) * 0.30f
+                                 + read_delay_hermite(state->refl_ring_r, er_d3, wpos) * 0.20f;
 
-                ear_l += refl_l * refl;
-                ear_r += refl_r * refl;
+                // 1-pole high-frequency room absorption damping (~4.2 kHz)
+                float damp_alpha = 1.0f - expf(-2.0f * (float)M_PI * 4200.0f / fs);
+                state->refl_damp_l += damp_alpha * (refl_raw_l - state->refl_damp_l);
+                state->refl_damp_r += damp_alpha * (refl_raw_r - state->refl_damp_r);
+
+                // 2-stage Schroeder All-Pass phase diffusion
+                float diff_l = allpass_step(state->refl_damp_l, state->diff1_buf_l, 167, &state->diff1_idx_l, 0.55f);
+                diff_l       = allpass_step(diff_l,             state->diff2_buf_l, 257, &state->diff2_idx_l, 0.45f);
+
+                float diff_r = allpass_step(state->refl_damp_r, state->diff1_buf_r, 197, &state->diff1_idx_r, 0.55f);
+                diff_r       = allpass_step(diff_r,             state->diff2_buf_r, 283, &state->diff2_idx_r, 0.45f);
+
+                ear_l += diff_l * refl;
+                ear_r += diff_r * refl;
             }
 
             samples[f * 2]     = ear_l;

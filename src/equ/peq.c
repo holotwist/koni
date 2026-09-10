@@ -15,9 +15,9 @@
 #endif
 
 typedef struct {
-    float b0, b1, b2, a1, a2;
-    float s1[PEQ_MAX_CHANNELS];
-    float s2[PEQ_MAX_CHANNELS];
+    double b0, b1, b2, a1, a2;
+    double s1[PEQ_MAX_CHANNELS];
+    double s2[PEQ_MAX_CHANNELS];
 } PEQBiquad;
 
 static pthread_mutex_t s_peq_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -37,61 +37,61 @@ const char* peq_get_filter_name(PEQFilterType type) {
 }
 
 static void compute_coefficients(PEQBiquad *bq, const PEQBand *band, uint32_t srate) {
-    if (!band->enabled || (band->type != PEQ_FILTER_HIGH_PASS && band->type != PEQ_FILTER_LOW_PASS && fabsf(band->gain_db) < 0.05f)) {
-        bq->b0 = 1.0f; bq->b1 = 0.0f; bq->b2 = 0.0f;
-        bq->a1 = 0.0f; bq->a2 = 0.0f;
+    if (!band->enabled || (band->type != PEQ_FILTER_HIGH_PASS && band->type != PEQ_FILTER_LOW_PASS && fabsf(band->gain_db) < 0.01f)) {
+        bq->b0 = 1.0; bq->b1 = 0.0; bq->b2 = 0.0;
+        bq->a1 = 0.0; bq->a2 = 0.0;
         return;
     }
 
-    float fs = (float)srate;
-    float f0 = band->freq;
-    if (f0 < PEQ_MIN_FREQ) f0 = PEQ_MIN_FREQ;
-    if (f0 >= fs * 0.49f) f0 = fs * 0.49f;
+    double fs = (double)srate;
+    double f0 = (double)band->freq;
+    if (f0 < (double)PEQ_MIN_FREQ) f0 = (double)PEQ_MIN_FREQ;
+    if (f0 >= fs * 0.49) f0 = fs * 0.49;
 
-    float q = band->q > 0.05f ? band->q : 0.7071f;
-    float A = powf(10.0f, band->gain_db / 40.0f);
-    float w0 = 2.0f * (float)M_PI * (f0 / fs);
-    float cos_w = cosf(w0);
-    float sin_w = sinf(w0);
-    float alpha = sin_w / (2.0f * q);
+    double q = band->q > 0.05f ? (double)band->q : 0.7071067811865476;
+    double A = pow(10.0, (double)band->gain_db / 40.0);
+    double w0 = 2.0 * M_PI * (f0 / fs);
+    double cos_w = cos(w0);
+    double sin_w = sin(w0);
+    double alpha = sin_w / (2.0 * q);
 
-    float b0, b1, b2, a0, a1, a2;
+    double b0, b1, b2, a0, a1, a2;
 
     switch (band->type) {
         case PEQ_FILTER_PEAK:
-            b0 = 1.0f + alpha * A;
-            b1 = -2.0f * cos_w;
-            b2 = 1.0f - alpha * A;
-            a0 = 1.0f + alpha / A;
-            a1 = -2.0f * cos_w;
-            a2 = 1.0f - alpha / A;
+            b0 = 1.0 + alpha * A;
+            b1 = -2.0 * cos_w;
+            b2 = 1.0 - alpha * A;
+            a0 = 1.0 + alpha / A;
+            a1 = -2.0 * cos_w;
+            a2 = 1.0 - alpha / A;
             break;
 
         case PEQ_FILTER_LOW_SHELF: {
-            float sqrt_a = sqrtf(A);
-            // Correct RBJ formulation for Q-specified shelving filters,
-            // 2 * sqrt(A) * alpha = sqrt(A) * sin_w / Q
-            float alpha_term = (sqrt_a * sin_w) / q;
+            // Strict Equalizer APO / AutoEQ LSQ derivation with Q factor
+            double diff = (A + 1.0 / A) * (1.0 / q - 1.0) + 2.0;
+            double alpha_term = sin_w * sqrt(diff > 0.0 ? diff : 0.0);
 
-            b0 =    A * ((A + 1.0f) - (A - 1.0f) * cos_w + alpha_term);
-            b1 = 2.0f * A * ((A - 1.0f) - (A + 1.0f) * cos_w);
-            b2 =    A * ((A + 1.0f) - (A - 1.0f) * cos_w - alpha_term);
-            a0 =        (A + 1.0f) + (A - 1.0f) * cos_w + alpha_term;
-            a1 = -2.0f * ((A - 1.0f) + (A + 1.0f) * cos_w);
-            a2 =        (A + 1.0f) + (A - 1.0f) * cos_w - alpha_term;
+            b0 =    A * ((A + 1.0) - (A - 1.0) * cos_w + alpha_term);
+            b1 =  2.0 * A * ((A - 1.0) - (A + 1.0) * cos_w);
+            b2 =    A * ((A + 1.0) - (A - 1.0) * cos_w - alpha_term);
+            a0 =        (A + 1.0) + (A - 1.0) * cos_w + alpha_term;
+            a1 = -2.0 * ((A - 1.0) + (A + 1.0) * cos_w);
+            a2 =        (A + 1.0) + (A - 1.0) * cos_w - alpha_term;
             break;
         }
 
         case PEQ_FILTER_HIGH_SHELF: {
-            float sqrt_a = sqrtf(A);
-            float alpha_term = (sqrt_a * sin_w) / q;
+            // Strict Equalizer APO / AutoEQ HSQ derivation with Q factor
+            double diff = (A + 1.0 / A) * (1.0 / q - 1.0) + 2.0;
+            double alpha_term = sin_w * sqrt(diff > 0.0 ? diff : 0.0);
 
-            b0 =    A * ((A + 1.0f) + (A - 1.0f) * cos_w + alpha_term);
-            b1 = -2.0f * A * ((A - 1.0f) + (A + 1.0f) * cos_w);
-            b2 =    A * ((A + 1.0f) + (A - 1.0f) * cos_w - alpha_term);
-            a0 =        (A + 1.0f) - (A - 1.0f) * cos_w + alpha_term;
-            a1 =  2.0f * ((A - 1.0f) - (A + 1.0f) * cos_w);
-            a2 =        (A + 1.0f) - (A - 1.0f) * cos_w - alpha_term;
+            b0 =    A * ((A + 1.0) + (A - 1.0) * cos_w + alpha_term);
+            b1 = -2.0 * A * ((A - 1.0) + (A + 1.0) * cos_w);
+            b2 =    A * ((A + 1.0) + (A - 1.0) * cos_w - alpha_term);
+            a0 =        (A + 1.0) - (A - 1.0) * cos_w + alpha_term;
+            a1 =  2.0 * ((A - 1.0) - (A + 1.0) * cos_w);
+            a2 =        (A + 1.0) - (A - 1.0) * cos_w - alpha_term;
             break;
         }
 
@@ -411,14 +411,19 @@ bool peq_load_file(const char *filepath) {
             float gain = 0.0f;
             float q = 0.7071f;
 
-            char dummy[32];
-            int read_items = sscanf(cursor, "%15s %15s %31s %f %31s %31s %f %31s %31s %f",
-                                    status_str, type_str, dummy, &freq, dummy, dummy, &gain, dummy, dummy, &q);
+            // Parse both standard AutoEQ exports and raw number lines
+            char *fc_pos = strcasestr(cursor, "Fc");
+            char *gain_pos = strcasestr(cursor, "Gain");
+            char *q_pos = strcasestr(cursor, "Q");
 
-            if (read_items < 4) {
-                if (sscanf(cursor, "%15s %15s %f %f %f", status_str, type_str, &freq, &gain, &q) < 5) {
-                    continue;
-                }
+            sscanf(cursor, "%15s %15s", status_str, type_str);
+
+            if (fc_pos && gain_pos && q_pos) {
+                sscanf(fc_pos + 2, "%f", &freq);
+                sscanf(gain_pos + 4, "%f", &gain);
+                sscanf(q_pos + 1, "%f", &q);
+            } else if (sscanf(cursor, "%15s %15s %f %f %f", status_str, type_str, &freq, &gain, &q) < 5) {
+                continue;
             }
 
             bool enabled = (strcasecmp(status_str, "ON") == 0);
@@ -576,18 +581,18 @@ void peq_process_float(float *samples_interleaved, uint32_t num_frames, uint16_t
         for (uint32_t f = 0; f < block_frames; f++) {
             uint32_t base = (frames_processed + f) * num_channels;
             for (uint16_t c = 0; c < channels; c++) {
-                float x = samples_interleaved[base + c] * s_current_preamp_mult;
+                double x = (double)(samples_interleaved[base + c] * s_current_preamp_mult);
 
                 for (int b = 0; b < PEQ_MAX_BANDS; b++) {
                     if (!s_bands[b].enabled) continue;
                     PEQBiquad *filter = &s_filters[b];
-                    float y = filter->b0 * x + filter->s1[c];
+                    double y = filter->b0 * x + filter->s1[c];
                     filter->s1[c] = filter->b1 * x - filter->a1 * y + filter->s2[c];
                     filter->s2[c] = filter->b2 * x - filter->a2 * y;
                     x = y;
                 }
 
-                samples_interleaved[base + c] = x;
+                samples_interleaved[base + c] = (float)x;
             }
         }
         frames_processed += block_frames;

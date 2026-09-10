@@ -6,6 +6,7 @@
 
 #define LIMITER_MAX_CHANNELS 8
 #define LIMITER_LOOKAHEAD_FRAMES 96
+#define LIMITER_POLYPHASE_TAPS 8
 
 typedef struct {
     float delay_buf[LIMITER_LOOKAHEAD_FRAMES * LIMITER_MAX_CHANNELS];
@@ -16,6 +17,11 @@ typedef struct {
     float alpha_attack;
     float alpha_release;
     float ceiling;
+
+    // ITU-R BS.1770 4x Polyphase True Peak Detector
+    float peak_history[LIMITER_MAX_CHANNELS][LIMITER_POLYPHASE_TAPS];
+    uint32_t hist_idx;
+    float fir_phases[4][LIMITER_POLYPHASE_TAPS];
 } LookaheadLimiter;
 
 void limiter_init(LookaheadLimiter *limiter, uint32_t sample_rate);
