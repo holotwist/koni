@@ -175,22 +175,25 @@ void krystal_process(float *samples_interleaved, uint32_t num_frames, uint16_t n
         krystal_bass_init(&s_bass, sample_rate);
         krystal_spatial_init(&s_spatial, sample_rate);
         krystal_exciter_init(&s_exciter, sample_rate);
+        krystal_saturator_init(&s_saturator, sample_rate);
+        krystal_spectral_init(&s_spectral, sample_rate);
+        krystal_transient_init(&s_transient, sample_rate);
+        krystal_meter_init(&s_meter, sample_rate);
     }
 
     KrystalConfig cfg = s_active_cfg;
-    pthread_mutex_unlock(&s_krystal_mutex);
 
     size_t total_samples = (size_t)num_frames * (size_t)num_channels;
     if (s_dry_buffer && total_samples <= s_dry_buffer_cap) {
         memcpy(s_dry_buffer, samples_interleaved, total_samples * sizeof(float));
     }
 
-    // Peak de-clipping
+    // De-clip
     if (cfg.transient.declip_enable) {
         krystal_declip_process(samples_interleaved, num_frames, num_channels, cfg.transient.declip_thresh);
     }
 
-    // Stage 0, General signal pre-processing
+    // Stage 0, Pre-gain, Balance, Polarity, Mode Routing
     float pre_mult = powf(10.0f, cfg.general.pre_gain_db / 20.0f);
     float bal = cfg.general.balance;
     float bal_l = (bal > 0.0f) ? (1.0f - bal) : 1.0f;
@@ -201,11 +204,9 @@ void krystal_process(float *samples_interleaved, uint32_t num_frames, uint16_t n
         float l = samples_interleaved[idx] * pre_mult;
         float r = (num_channels > 1) ? (samples_interleaved[idx + 1] * pre_mult) : l;
 
-        // Polarity inversion
         if (cfg.general.polarity == POLARITY_INVERT_L || cfg.general.polarity == POLARITY_INVERT_BOTH) l = -l;
         if (cfg.general.polarity == POLARITY_INVERT_R || cfg.general.polarity == POLARITY_INVERT_BOTH) r = -r;
 
-        // Channel routing matrix
         if (num_channels > 1) {
             switch (cfg.general.mode) {
                 case CHAN_MODE_SWAP: {
@@ -222,25 +223,20 @@ void krystal_process(float *samples_interleaved, uint32_t num_frames, uint16_t n
                     l = side; r = -side;
                     break;
                 }
-                case CHAN_MODE_LEFT_ONLY:
-                    r = l;
-                    break;
-                case CHAN_MODE_RIGHT_ONLY:
-                    l = r;
-                    break;
-                default:
-                    break;
+                case CHAN_MODE_LEFT_ONLY:  r = l; break;
+                case CHAN_MODE_RIGHT_ONLY: l = r; break;
+                default: break;
             }
             l *= bal_l;
             r *= bal_r;
-            samples_interleaved[idx] = l;
+            samples_interleaved[idx]     = l;
             samples_interleaved[idx + 1] = r;
         } else {
             samples_interleaved[idx] = l;
         }
     }
 
-    // Input RMS calculation for auto-gain trim
+    // RMS input measurement for auto-gain
     float in_sum_sq = 0.0f;
     float in_peak = 0.0f;
     for (size_t i = 0; i < total_samples; i++) {
@@ -252,14 +248,14 @@ void krystal_process(float *samples_interleaved, uint32_t num_frames, uint16_t n
     float crest_db = (in_rms > 1e-5f) ? (20.0f * log10f((in_peak + 1e-6f) / in_rms)) : 0.0f;
     if (crest_db < 0.0f) crest_db = 0.0f;
 
-    // Fletcher-Munson dynamic loudness
+    // Loudness
     float l_bass_db = 0.0f, l_treb_db = 0.0f;
     if (cfg.loudness.enabled) {
         krystal_loudness_process(&s_loudness, samples_interleaved, num_frames, num_channels,
                                  &cfg.loudness, sample_rate, volume_percent, &l_bass_db, &l_treb_db);
     }
 
-    // 3D Spatial and crossfeed
+    // Spatial
     float m_eng = 0.0f, s_eng = 0.0f, phase_corr = 1.0f;
     bool clamped = false;
     if (cfg.spatial.enabled && num_channels >= 2) {
@@ -267,37 +263,39 @@ void krystal_process(float *samples_interleaved, uint32_t num_frames, uint16_t n
                                 &m_eng, &s_eng, &phase_corr, &clamped);
     }
 
-    // Dynamic spectral balancing
+    // Spectral
     float harsh_cut = 0.0f, boom_cut = 0.0f;
     if (cfg.spectral.enabled) {
         krystal_spectral_process(&s_spectral, samples_interleaved, num_frames, num_channels,
                                  &cfg.spectral, sample_rate, &harsh_cut, &boom_cut);
     }
 
-    // Transient shaping
+    // Transient
     float trans_eng = 0.0f;
     if (cfg.transient.enabled) {
         trans_eng = krystal_transient_process(&s_transient, samples_interleaved, num_frames,
                                               num_channels, &cfg.transient, sample_rate);
     }
 
-    // Psychoacoustic bass
+    // Bass
     float bass_inj = 0.0f, sub_eng = 0.0f, oct_eng = 0.0f;
     if (cfg.bass.enabled) {
         bass_inj = krystal_bass_process(&s_bass, samples_interleaved, num_frames, num_channels,
                                         &cfg.bass, sample_rate, &sub_eng, &oct_eng);
     }
 
-    // Spectral exciter
+    // Exciter
     float exciter_inj = 0.0f;
     if (cfg.exciter.enabled) {
-        exciter_inj = krystal_exciter_process(&s_exciter, samples_interleaved, num_frames, num_channels, &cfg.exciter, sample_rate);
+        exciter_inj = krystal_exciter_process(&s_exciter, samples_interleaved, num_frames, num_channels,
+                                              &cfg.exciter, sample_rate);
     }
 
-    // Color saturation
+    // Saturator
     float sat_eng = 0.0f;
     if (cfg.saturator.enabled) {
-        sat_eng = krystal_saturator_process(&s_saturator, samples_interleaved, num_frames, num_channels, &cfg.saturator, sample_rate);
+        sat_eng = krystal_saturator_process(&s_saturator, samples_interleaved, num_frames, num_channels,
+                                            &cfg.saturator, sample_rate);
     }
 
     // Auto-gain trim
@@ -315,7 +313,7 @@ void krystal_process(float *samples_interleaved, uint32_t num_frames, uint16_t n
         }
     }
 
-    // Master Dry/Wet mix & DAC headroom guard
+    // Master Dry/Wet & Headroom
     float wet = cfg.general.master_mix;
     float dry = 1.0f - wet;
     float headroom_mult = powf(10.0f, cfg.general.headroom_db / 20.0f);
@@ -336,7 +334,7 @@ void krystal_process(float *samples_interleaved, uint32_t num_frames, uint16_t n
     float lufs = -70.0f, peak_db = -70.0f;
     krystal_meter_process(&s_meter, samples_interleaved, num_frames, num_channels, sample_rate, &lufs, &peak_db);
 
-    pthread_mutex_lock(&s_krystal_mutex);
+    // Update telemetry while still holding the mutex
     s_telemetry.sub_energy = sub_eng;
     s_telemetry.bass_injected_energy = bass_inj;
     s_telemetry.mid_energy = m_eng;
@@ -356,6 +354,7 @@ void krystal_process(float *samples_interleaved, uint32_t num_frames, uint16_t n
     s_telemetry.sub_octave_energy = oct_eng;
     s_telemetry.lufs_momentary = lufs;
     s_telemetry.peak_dbfs = peak_db;
+
     pthread_mutex_unlock(&s_krystal_mutex);
 }
 

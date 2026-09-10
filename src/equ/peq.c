@@ -69,25 +69,29 @@ static void compute_coefficients(PEQBiquad *bq, const PEQBand *band, uint32_t sr
 
         case PEQ_FILTER_LOW_SHELF: {
             float sqrt_a = sqrtf(A);
-            float shelf_alpha = sin_w * 0.5f * sqrtf((A + 1.0f / A) * (1.0f / q - 1.0f) + 2.0f);
-            b0 =    A * ((A + 1.0f) - (A - 1.0f) * cos_w + 2.0f * sqrt_a * shelf_alpha);
+            // Correct RBJ formulation for Q-specified shelving filters,
+            // 2 * sqrt(A) * alpha = sqrt(A) * sin_w / Q
+            float alpha_term = (sqrt_a * sin_w) / q;
+
+            b0 =    A * ((A + 1.0f) - (A - 1.0f) * cos_w + alpha_term);
             b1 = 2.0f * A * ((A - 1.0f) - (A + 1.0f) * cos_w);
-            b2 =    A * ((A + 1.0f) - (A - 1.0f) * cos_w - 2.0f * sqrt_a * shelf_alpha);
-            a0 =        (A + 1.0f) + (A - 1.0f) * cos_w + 2.0f * sqrt_a * shelf_alpha;
+            b2 =    A * ((A + 1.0f) - (A - 1.0f) * cos_w - alpha_term);
+            a0 =        (A + 1.0f) + (A - 1.0f) * cos_w + alpha_term;
             a1 = -2.0f * ((A - 1.0f) + (A + 1.0f) * cos_w);
-            a2 =        (A + 1.0f) + (A - 1.0f) * cos_w - 2.0f * sqrt_a * shelf_alpha;
+            a2 =        (A + 1.0f) + (A - 1.0f) * cos_w - alpha_term;
             break;
         }
 
         case PEQ_FILTER_HIGH_SHELF: {
             float sqrt_a = sqrtf(A);
-            float shelf_alpha = sin_w * 0.5f * sqrtf((A + 1.0f / A) * (1.0f / q - 1.0f) + 2.0f);
-            b0 =    A * ((A + 1.0f) + (A - 1.0f) * cos_w + 2.0f * sqrt_a * shelf_alpha);
+            float alpha_term = (sqrt_a * sin_w) / q;
+
+            b0 =    A * ((A + 1.0f) + (A - 1.0f) * cos_w + alpha_term);
             b1 = -2.0f * A * ((A - 1.0f) + (A + 1.0f) * cos_w);
-            b2 =    A * ((A + 1.0f) + (A - 1.0f) * cos_w - 2.0f * sqrt_a * shelf_alpha);
-            a0 =        (A + 1.0f) - (A - 1.0f) * cos_w + 2.0f * sqrt_a * shelf_alpha;
+            b2 =    A * ((A + 1.0f) + (A - 1.0f) * cos_w - alpha_term);
+            a0 =        (A + 1.0f) - (A - 1.0f) * cos_w + alpha_term;
             a1 =  2.0f * ((A - 1.0f) - (A + 1.0f) * cos_w);
-            a2 =        (A + 1.0f) - (A - 1.0f) * cos_w - 2.0f * sqrt_a * shelf_alpha;
+            a2 =        (A + 1.0f) - (A - 1.0f) * cos_w - alpha_term;
             break;
         }
 
