@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
 #include "third_party/stb_image.h"
 
