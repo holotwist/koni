@@ -32,7 +32,7 @@ struct KoniDecoder {
     uint32_t cur_sample_idx;
     uint8_t packet_buf[PACKET_BUF_MAX];
 
-    // Interleaved 16-bit intermediate buffer from faad
+    // Interleaved 16-bit intermediate buffer
     int16_t fifo[DECODE_FIFO_MAX];
     uint32_t fifo_head;
     uint32_t fifo_len;
