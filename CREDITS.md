@@ -68,4 +68,4 @@ Koni also links against the following open-source system libraries:
 ## 4. Project License
 
 Koni (including Sparkles) itself is distributed under the **GNU General Public License v3.0 (GPLv3)**.  
-See the [LICENSE](LICENSE) file in the root directory for the complete license text.
+See the [LICENSE](LICENSE.txt) file in the root directory for the complete license text.
