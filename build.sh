@@ -5,6 +5,7 @@ set -o pipefail
 BUILD_DIR="build"
 DIST_DIR="dist"
 PORTABLE=OFF
+SEMI_STATIC=OFF
 MODERN_X86=OFF
 X86_LEVEL="x86-64-v3"
 BUILD_TYPE="Release"
@@ -19,8 +20,10 @@ print_help() {
 Usage: ./build.sh [OPTIONS] [-- <additional cmake flags>]
 
 Options:
-  -p, --package [ver]     Build generic release binaries and create .tar.gz packages
-      --portable          Compile for generic baseline architecture
+  -p,  --package [ver]        Build release binaries and create .tar.gz packages
+  -ps, --package-static [ver] Package release with semi-static linking (-static suffix)
+       --semi-static          Link dependencies statically (.a) where available
+       --portable             Compile for generic baseline architecture1
   -s, --sparkles          Build Koni Sparkles graphical UI (requires raylib, opt-in)
       --no-sparkles       Ensure Sparkles GUI is disabled (default)
   -m, --modern            Build for modern x86_64 (x86-64-v3) instead of generic x86-64
@@ -41,6 +44,23 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -ps|--package-static)
+            PACKAGE=1
+            SEMI_STATIC=ON
+            PORTABLE=ON
+            BUILD_TYPE="Release"
+            BUILD_SPARKLES=ON
+            if [[ $# -gt 1 && "$2" != -* ]]; then
+                PACKAGE_VER="$2"
+                shift 2
+            else
+                shift
+            fi
+            ;;
+        --semi-static)
+            SEMI_STATIC=ON
+            shift
+            ;;
         -p|--package)
             PACKAGE=1
             PORTABLE=ON
@@ -113,6 +133,7 @@ CMAKE_CONFIG_ARGS=(
     -B "$BUILD_DIR"
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
     -DPORTABLE_BUILD="$PORTABLE"
+    -DSEMI_STATIC="$SEMI_STATIC"
     -DMODERN_X86_64="$MODERN_X86"
     -DBUILD_SPARKLES="$BUILD_SPARKLES"
 )
@@ -200,10 +221,15 @@ if [ "$PACKAGE" -eq 1 ]; then
         fi
     }
 
+    STATIC_TAG=""
+    if [ "$SEMI_STATIC" = "ON" ]; then
+        STATIC_TAG="-static"
+    fi
+
     mkdir -p "$DIST_DIR"
 
     # Package koni-cli
-    CLI_NAME="koni-cli-${VERSION}-${OS_NAME}-${ARCH}"
+    CLI_NAME="koni-cli-${VERSION}-${OS_NAME}-${ARCH}${STATIC_TAG}"
     CLI_STAGE="${DIST_DIR}/${CLI_NAME}"
     rm -rf "$CLI_STAGE"
     mkdir -p "$CLI_STAGE"
@@ -223,7 +249,7 @@ if [ "$PACKAGE" -eq 1 ]; then
 
     # Package koni-full (if koni-sparkles was built)
     if [ -f "${BUILD_DIR}/koni-sparkles" ]; then
-        FULL_NAME="koni-full-${VERSION}-${OS_NAME}-${ARCH}"
+        FULL_NAME="koni-full-${VERSION}-${OS_NAME}-${ARCH}${STATIC_TAG}"
         FULL_STAGE="${DIST_DIR}/${FULL_NAME}"
         rm -rf "$FULL_STAGE"
         mkdir -p "$FULL_STAGE"
