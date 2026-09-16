@@ -1,11 +1,20 @@
 #include "state.h"
 #include "file_list.h"
+#include "db.h"
 #include "audio.h"
 #include "ui.h"
 #include "codec.h"
+#include "extension.h"
 #include "protocols/mpris.h"
 #include "vis_math.h"
 #include "config.h"
+#include "playlist_manager.h"
+#include "equalizer.h"
+#include "ui_eq.h"
+#include "ui_krystal.h"
+#include "krystal_engine.h"
+#include "krystal_preset_manager.h"
+#include "listening_profile.h"
 #include <curl/curl.h>
 
 #include <locale.h>
@@ -30,8 +39,18 @@ int main(int argc, char **argv) {
 
     setlocale(LC_ALL, ""); 
     config_init(); // Initialize configuration manager
+    db_init(); // Initialize SQLite cache
+    playlist_mgmt_init(); // Initialize playlists & favourites
+    eq_init(); // Initialize 10-band biquad equalizer
+    krystal_init(44100); // Initialize Krystal to Bypass default
+    listening_profile_init();
+    ui_eq_init();
+    ui_krystal_init();
+    krystal_presets_init();
     curl_global_init(CURL_GLOBAL_DEFAULT);
     load_state(); // Load all the previous state
+    library_reload(); // Read database tracks into memory
+    library_scanner_start(); // Trigger background sync scan
 
     if (dir_idx != -1) { 
         if (chdir(argv[dir_idx]) != 0) perror("chdir failed"); 
@@ -47,6 +66,7 @@ int main(int argc, char **argv) {
     file_list_init();
     load_directory(".");
     vis_math_init();
+    koni_extensions_init();
     
     // Expose DBus methods and properties
     mpris_init();
@@ -59,9 +79,17 @@ int main(int argc, char **argv) {
     atomic_store(&current_cmd_atomic, CMD_QUIT);
     pthread_join(audio_thread, NULL);
     
+    koni_extensions_shutdown();
     mpris_shutdown();
+    library_scanner_shutdown();
     save_state(); // Dump state before exiting
+    config_save(); // Save configuration
+    listening_profile_shutdown();
+    krystal_presets_shutdown();
     file_list_shutdown();
+    playlist_mgmt_shutdown();
+    db_shutdown();
+    config_cleanup();
     
     koni_metadata_free(&p_metadata);
     
@@ -73,6 +101,10 @@ int main(int argc, char **argv) {
     if (playlist) {
         for (int i = 0; i < num_playlist_files; i++) koni_metadata_free(&playlist[i].meta);
         free(playlist);
+    }
+    if (active_folder.file_names) {
+        for (int i = 0; i < active_folder.count; i++) free(active_folder.file_names[i]);
+        free(active_folder.file_names);
     }
     
     curl_global_cleanup();

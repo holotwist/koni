@@ -25,8 +25,9 @@ typedef struct {
     char artist[256];
     char album[256];
     char filepath[1024];
-    const char *embedded_text;
+    char *embedded_text;
     uint32_t duration_sec;
+    int track_id;
 } LyricFetchQuery;
 
 typedef struct {
@@ -53,7 +54,7 @@ int lyric_document_get_active_line(const LyricDocument *doc, uint32_t time_ms);
 
 // Lyrics engine API
 void lyrics_engine_init(void);
-void lyrics_engine_fetch_async(const char *title, const char *artist, const char *album, uint32_t duration, const char *filepath, const char *embedded_text);
+void lyrics_engine_fetch_async(const char *title, const char *artist, const char *album, uint32_t duration, const char *filepath, const char *embedded_text, int track_id);
 const KoniLyricsPlugin* lyrics_find_plugin_by_ext(const char *filepath);
 
 #ifdef __cplusplus

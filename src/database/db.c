@@ -1,0 +1,385 @@
+#define _DEFAULT_SOURCE
+#define _XOPEN_SOURCE 600
+
+#include "db.h"
+#include "config.h"
+#include <sqlite3.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <pthread.h>
+
+static sqlite3 *db = NULL;
+static pthread_mutex_t db_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void sql_basename(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
+    (void)argc;
+    const unsigned char *text = sqlite3_value_text(argv[0]);
+    if (!text) {
+        sqlite3_result_null(ctx);
+        return;
+    }
+    const char *slash = strrchr((const char *)text, '/');
+    sqlite3_result_text(ctx, slash ? slash + 1 : (const char *)text, -1, SQLITE_TRANSIENT);
+}
+
+static void ensure_dir(const char *path) {
+    char tmp[1024];
+    snprintf(tmp, sizeof(tmp), "%s", path);
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = 0;
+            mkdir(tmp, 0755);
+            *p = '/';
+        }
+    }
+    mkdir(tmp, 0755);
+}
+
+bool db_init(void) {
+    pthread_mutex_lock(&db_mutex);
+    const char *home = getenv("HOME");
+    if (!home) {
+        pthread_mutex_unlock(&db_mutex);
+        return false;
+    }
+
+    char db_dir[1024];
+    snprintf(db_dir, sizeof(db_dir), "%s/.config/koni", home);
+    ensure_dir(db_dir);
+
+    char db_path[1024];
+    snprintf(db_path, sizeof(db_path), "%s/library.db", db_dir);
+
+    if (sqlite3_open(db_path, &db) != SQLITE_OK) {
+        fprintf(stderr, "SQLite open error: %s\n", sqlite3_errmsg(db));
+        pthread_mutex_unlock(&db_mutex);
+        return false;
+    }
+
+    // Register custom basename function for path-to-filename fallback sorting
+    sqlite3_create_function(db, "basename", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, sql_basename, NULL, NULL);
+
+    // Optimize SQLite for high-read and cap cache at 2 MB
+    sqlite3_exec(db, "PRAGMA journal_mode = WAL;", NULL, NULL, NULL);
+    sqlite3_exec(db, "PRAGMA synchronous = NORMAL;", NULL, NULL, NULL);
+    sqlite3_exec(db, "PRAGMA cache_size = -2000;", NULL, NULL, NULL);
+
+    const char *schema = 
+        "CREATE TABLE IF NOT EXISTS tracks ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  path TEXT UNIQUE NOT NULL,"
+        "  mtime INTEGER NOT NULL,"
+        "  title TEXT,"
+        "  artist TEXT,"
+        "  album TEXT,"
+        "  duration INTEGER,"
+        "  has_gain INTEGER,"
+        "  track_gain REAL"
+        ");"
+        "CREATE INDEX IF NOT EXISTS idx_path ON tracks(path);"
+        "CREATE INDEX IF NOT EXISTS idx_artist_title ON tracks(artist, title);";
+
+    char *err_msg = NULL;
+    if (sqlite3_exec(db, schema, NULL, NULL, &err_msg) != SQLITE_OK) {
+        fprintf(stderr, "SQLite schema error: %s\n", err_msg);
+        sqlite3_free(err_msg);
+        pthread_mutex_unlock(&db_mutex);
+        return false;
+    }
+
+    pthread_mutex_unlock(&db_mutex);
+    return true;
+}
+
+void db_shutdown(void) {
+    pthread_mutex_lock(&db_mutex);
+    if (db) {
+        sqlite3_close(db);
+        db = NULL;
+    }
+    pthread_mutex_unlock(&db_mutex);
+}
+
+bool db_get_track_mtime(const char *filepath, time_t *out_mtime) {
+    pthread_mutex_lock(&db_mutex);
+    if (!db) { pthread_mutex_unlock(&db_mutex); return false; }
+
+    const char *sql = "SELECT mtime FROM tracks WHERE path = ? LIMIT 1;";
+    sqlite3_stmt *stmt;
+    bool found = false;
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, filepath, -1, SQLITE_STATIC);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            *out_mtime = (time_t)sqlite3_column_int64(stmt, 0);
+            found = true;
+        }
+        sqlite3_finalize(stmt);
+    }
+    pthread_mutex_unlock(&db_mutex);
+    return found;
+}
+
+bool db_get_track_meta(const char *filepath, time_t mtime, KoniMetadata *out_meta, uint32_t *out_duration) {
+    pthread_mutex_lock(&db_mutex);
+    if (!db) { pthread_mutex_unlock(&db_mutex); return false; }
+
+    const char *sql = "SELECT mtime, title, artist, album, duration, has_gain, track_gain FROM tracks WHERE path = ? LIMIT 1;";
+    sqlite3_stmt *stmt;
+    bool found = false;
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, filepath, -1, SQLITE_STATIC);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            time_t cached_mtime = (time_t)sqlite3_column_int64(stmt, 0);
+            if (cached_mtime == mtime) {
+                const char *title = (const char *)sqlite3_column_text(stmt, 1);
+                const char *artist = (const char *)sqlite3_column_text(stmt, 2);
+                const char *album = (const char *)sqlite3_column_text(stmt, 3);
+                
+                if (title && title[0]) out_meta->title = strdup(title);
+                if (artist && artist[0]) out_meta->artist = strdup(artist);
+                if (album && album[0]) out_meta->album = strdup(album);
+                
+                if (out_duration) *out_duration = sqlite3_column_int(stmt, 4);
+                out_meta->has_track_gain = sqlite3_column_int(stmt, 5) ? true : false;
+                out_meta->track_gain = (float)sqlite3_column_double(stmt, 6);
+                found = true;
+            }
+        }
+        sqlite3_finalize(stmt);
+    }
+    pthread_mutex_unlock(&db_mutex);
+    return found;
+}
+
+bool db_upsert_track(const char *filepath, time_t mtime, const KoniMetadata *meta, uint32_t duration_sec) {
+    pthread_mutex_lock(&db_mutex);
+    if (!db) { pthread_mutex_unlock(&db_mutex); return false; }
+
+    const char *sql = 
+        "INSERT INTO tracks (path, mtime, title, artist, album, duration, has_gain, track_gain) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(path) DO UPDATE SET "
+        "mtime = excluded.mtime, title = excluded.title, artist = excluded.artist, "
+        "album = excluded.album, duration = excluded.duration, has_gain = excluded.has_gain, "
+        "track_gain = excluded.track_gain;";
+
+    sqlite3_stmt *stmt;
+    bool ok = false;
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, filepath, -1, SQLITE_STATIC);
+        sqlite3_bind_int64(stmt, 2, (sqlite3_int64)mtime);
+        sqlite3_bind_text(stmt, 3, (meta && meta->title) ? meta->title : "", -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 4, (meta && meta->artist) ? meta->artist : "", -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 5, (meta && meta->album) ? meta->album : "", -1, SQLITE_STATIC);
+        sqlite3_bind_int(stmt, 6, duration_sec);
+        sqlite3_bind_int(stmt, 7, (meta && meta->has_track_gain) ? 1 : 0);
+        sqlite3_bind_double(stmt, 8, (meta && meta->has_track_gain) ? (double)meta->track_gain : 0.0);
+
+        ok = (sqlite3_step(stmt) == SQLITE_DONE);
+        sqlite3_finalize(stmt);
+    }
+    pthread_mutex_unlock(&db_mutex);
+    return ok;
+}
+
+void db_delete_track(const char *filepath) {
+    pthread_mutex_lock(&db_mutex);
+    if (!db) { pthread_mutex_unlock(&db_mutex); return; }
+
+    const char *sql = "DELETE FROM tracks WHERE path = ?;";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, filepath, -1, SQLITE_STATIC);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+    pthread_mutex_unlock(&db_mutex);
+}
+
+void db_rebuild_library(void) {
+    pthread_mutex_lock(&db_mutex);
+    if (db) {
+        sqlite3_exec(db, "DELETE FROM tracks;", NULL, NULL, NULL);
+        sqlite3_exec(db, "VACUUM;", NULL, NULL, NULL);
+    }
+    pthread_mutex_unlock(&db_mutex);
+    library_scanner_start();
+}
+
+void db_prune_missing_files(void) {
+    pthread_mutex_lock(&db_mutex);
+    if (!db) { pthread_mutex_unlock(&db_mutex); return; }
+
+    const char *sql = "SELECT path FROM tracks;";
+    const char *del_sql = "DELETE FROM tracks WHERE path = ?;";
+    sqlite3_stmt *stmt;
+    sqlite3_stmt *del_stmt = NULL;
+
+    if (sqlite3_prepare_v2(db, del_sql, -1, &del_stmt, NULL) != SQLITE_OK) {
+        pthread_mutex_unlock(&db_mutex);
+        return;
+    }
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const char *path = (const char *)sqlite3_column_text(stmt, 0);
+            if (path) {
+                bool should_remove = false;
+                if (access(path, F_OK) != 0) {
+                    should_remove = true;
+                } else if (!config_find_parent_music_dir(path, NULL)) {
+                    // File exists on disk but is not in any selected music folder
+                    should_remove = true;
+                }
+
+                if (should_remove) {
+                    sqlite3_reset(del_stmt);
+                    sqlite3_bind_text(del_stmt, 1, path, -1, SQLITE_STATIC);
+                    sqlite3_step(del_stmt);
+                }
+            }
+        }
+        sqlite3_finalize(stmt);
+    }
+    if (del_stmt) sqlite3_finalize(del_stmt);
+    pthread_mutex_unlock(&db_mutex);
+}
+
+const char* db_get_sort_name(DBSortMode mode) {
+    switch (mode) {
+        case DB_SORT_TITLE:        return "Title";
+        case DB_SORT_ARTIST_ALBUM: return "Artist / Album";
+        case DB_SORT_ALBUM:        return "Album";
+        case DB_SORT_DURATION:     return "Duration";
+        case DB_SORT_PATH:         return "File Path";
+        default:                   return "Title";
+    }
+}
+
+// 64 KB Chunked String Arena 
+typedef struct StringChunk {
+    struct StringChunk *next;
+    size_t used;
+    size_t capacity;
+    char data[];
+} StringChunk;
+
+static StringChunk *s_track_arena = NULL;
+
+static void arena_free_all(StringChunk **head) {
+    StringChunk *curr = *head;
+    while (curr) {
+        StringChunk *next = curr->next;
+        free(curr);
+        curr = next;
+    }
+    *head = NULL;
+}
+
+static const char* arena_strdup(StringChunk **head, const char *str) {
+    if (!str || str[0] == '\0') return "";
+    size_t len = strlen(str) + 1;
+
+    // Allocate a new 64 KB block if this chunk doesn't have enough remaining space
+    if (!*head || (*head)->used + len > (*head)->capacity) {
+        size_t cap = 65536;
+        if (len > cap) cap = len;
+        StringChunk *chunk = malloc(sizeof(StringChunk) + cap);
+        if (!chunk) return "";
+        chunk->next = *head;
+        chunk->used = 0;
+        chunk->capacity = cap;
+        *head = chunk;
+    }
+
+    char *dest = (*head)->data + (*head)->used;
+    memcpy(dest, str, len);
+    (*head)->used += len;
+    return dest;
+}
+
+int db_load_all_tracks(DBTrack **out_tracks, DBSortMode sort_mode) {
+    pthread_mutex_lock(&db_mutex);
+    if (!db) { 
+        *out_tracks = NULL;
+        pthread_mutex_unlock(&db_mutex); 
+        return 0; 
+    }
+
+    // Clean up any existing string arena before loading
+    arena_free_all(&s_track_arena);
+
+    const char *order_clause;
+    switch (sort_mode) {
+        case DB_SORT_TITLE:
+        default:
+            order_clause = "CASE WHEN title IS NOT NULL AND title != '' THEN title ELSE basename(path) END COLLATE NOCASE ASC, artist COLLATE NOCASE ASC, path ASC";
+            break;
+        case DB_SORT_ARTIST_ALBUM:
+            order_clause = "artist COLLATE NOCASE, album COLLATE NOCASE, (CASE WHEN title IS NOT NULL AND title != '' THEN title ELSE basename(path) END) COLLATE NOCASE, path ASC";
+            break;
+        case DB_SORT_ALBUM:
+            order_clause = "album COLLATE NOCASE ASC, artist COLLATE NOCASE ASC, (CASE WHEN title IS NOT NULL AND title != '' THEN title ELSE basename(path) END) COLLATE NOCASE ASC, path ASC";
+            break;
+        case DB_SORT_DURATION:
+            order_clause = "duration DESC, artist COLLATE NOCASE ASC, (CASE WHEN title IS NOT NULL AND title != '' THEN title ELSE basename(path) END) COLLATE NOCASE ASC";
+            break;
+        case DB_SORT_PATH:
+            order_clause = "path COLLATE NOCASE ASC";
+            break;
+    }
+
+    char sql[512];
+    snprintf(sql, sizeof(sql),
+             "SELECT id, path, mtime, title, artist, album, duration, has_gain, track_gain "
+             "FROM tracks ORDER BY %s;", order_clause);
+
+    sqlite3_stmt *stmt;
+    int count = 0;
+    int capacity = 256;
+    DBTrack *tracks = malloc(sizeof(DBTrack) * capacity);
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            if (count >= capacity) {
+                capacity *= 2;
+                tracks = realloc(tracks, sizeof(DBTrack) * capacity);
+            }
+            DBTrack *t = &tracks[count++];
+            t->id = sqlite3_column_int64(stmt, 0);
+            t->mtime = (time_t)sqlite3_column_int64(stmt, 2);
+            t->duration_sec = sqlite3_column_int(stmt, 6);
+            t->has_track_gain = sqlite3_column_int(stmt, 7) ? true : false;
+            t->track_gain = (float)sqlite3_column_double(stmt, 8);
+
+            // Store strings in the contiguous 64 KB Arena
+            t->path = arena_strdup(&s_track_arena, (const char *)sqlite3_column_text(stmt, 1));
+            t->title = arena_strdup(&s_track_arena, (const char *)sqlite3_column_text(stmt, 3));
+            t->artist = arena_strdup(&s_track_arena, (const char *)sqlite3_column_text(stmt, 4));
+            t->album = arena_strdup(&s_track_arena, (const char *)sqlite3_column_text(stmt, 5));
+
+            // Sub-slice pointer into t->path directly
+            const char *slash = strrchr(t->path, '/');
+            t->name = slash ? slash + 1 : t->path;
+        }
+        sqlite3_finalize(stmt);
+    }
+    pthread_mutex_unlock(&db_mutex);
+
+    *out_tracks = tracks;
+    return count;
+}
+
+void db_free_tracks(DBTrack *tracks, int count) {
+    (void)count;
+    pthread_mutex_lock(&db_mutex);
+    arena_free_all(&s_track_arena);
+    pthread_mutex_unlock(&db_mutex);
+    if (tracks) free(tracks);
+}

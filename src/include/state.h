@@ -29,9 +29,19 @@ typedef struct {
 } PlaylistEntry;
 
 typedef enum {
-    FOCUS_FILES,
-    FOCUS_PLAYLIST
-} UIFocus;
+    TAB_QUEUE = 0,
+    TAB_MUSIC = 1,
+    TAB_PLAYLISTS = 2,
+    TAB_FILES = 3
+} BrowserTab;
+
+typedef enum {
+    SOURCE_NONE = 0,
+    SOURCE_FILES,
+    SOURCE_QUEUE,
+    SOURCE_LIBRARY,
+    SOURCE_PLAYLIST
+} PlaybackSource;
 
 typedef enum {
     STATE_STOPPED,
@@ -57,7 +67,15 @@ typedef enum {
     REPEAT_ONE
 } RepeatMode;
 
-/* Shared Globals */
+typedef enum {
+    SHUFFLE_ALG_RANDOM = 0,
+    SHUFFLE_ALG_FISHER_YATES,
+    SHUFFLE_ALG_BALANCED,
+    SHUFFLE_ALG_WEIGHTED,
+    SHUFFLE_ALG_COUNT
+} ShuffleAlgorithm;
+
+// Shared Globals 
 extern pthread_mutex_t state_mutex;
 
 extern char current_dir[1024];
@@ -67,21 +85,67 @@ extern int files_capacity;
 extern int selected_file_idx;
 extern int scroll_offset;
 
+#include "db.h"
+
 extern PlaylistEntry *playlist;
 extern int num_playlist_files;
 extern int playlist_capacity;
 extern int selected_playlist_idx;
 extern int playlist_scroll_offset;
-extern bool playing_from_playlist;
 
+extern DBTrack *library_tracks;
+extern int num_library_tracks;
+extern int selected_library_idx;
+extern int library_scroll_offset;
+extern DBSortMode current_library_sort;
+
+// Playlists navigation and scope state
+extern int selected_playlist_browser_idx;
+extern int playlist_browser_scroll_offset;
+extern bool playlist_in_drilldown;
+extern char active_playlist_name[128];
+extern int selected_playlist_track_idx;
+extern int playlist_track_scroll_offset;
+
+// Playback session storage for Files context
+typedef struct {
+    char dir[1024];
+    char **file_names;
+    int count;
+} ActiveFolderContext;
+
+typedef struct {
+    char name[128];
+    char **paths;
+    char **titles;
+    int count;
+} ActivePlaylistPlaybackContext;
+
+extern ActiveFolderContext active_folder;
+extern ActivePlaylistPlaybackContext active_playlist_playback;
+extern PlaybackSource base_play_source;
+extern int base_playing_idx;
+
+typedef struct {
+    bool active;
+    char message[256];
+    char target_path[1024];
+} FolderDialog;
+
+extern FolderDialog folder_dialog;
+extern BrowserTab current_browser_tab;
+extern PlaybackSource current_play_source;
+
+void library_reload(void);
 void load_state(void);
 void save_state(void);
-
-extern UIFocus current_focus;
 
 extern char playing_filepath[1024];
 extern char playing_filename[256];
 extern int playing_file_idx;
+
+extern const KoniCodecImpl *active_codec;
+extern KoniDecoder *active_decoder;
 
 extern KoniAudioFormat p_format;
 extern KoniMetadata p_metadata;
@@ -94,6 +158,7 @@ extern atomic_int  volume;
 extern atomic_int  seek_target_ms;
 extern atomic_int  play_mode_shuffle;
 extern atomic_int  play_mode_repeat;
+extern atomic_int  shuffle_algorithm;
 
 extern int play_history[256];
 extern int history_len;
@@ -119,7 +184,10 @@ extern float       vis_ring_r[VIS_BUF_SIZE];
 extern atomic_uint vis_wpos;
 extern atomic_uint vis_srate;
 extern atomic_uint p_frames_consumed;
+extern atomic_ullong p_hw_frames_played;
+extern atomic_ullong p_track_hw_start;
 
 bool player_advance_track(PlayerCommand cmd);
+bool player_peek_next_track(char *out_path, size_t path_sz, char *out_name, size_t name_sz, int *out_idx);
 
 #endif // PLAYER_STATE_H

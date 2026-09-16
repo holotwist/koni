@@ -1,0 +1,14 @@
+PxTone Audio Codec Reimplementation for Koni (C Implementation)
+
+The PxTone sound engine specification, synthesis algorithms, frequency tables,
+and file formats (.ptcop, .pttune, .ptnoise, .ptvoice) were originally created
+and designed by:
+
+    Daisuke "Pixel" Amaya (Studio Pixel)
+    https://studiopixel.jp/
+
+This implementation in Koni is an independent, lightweight C reimplementation
+inspired by and compatible with the original pxtone library.
+
+Special thanks to Pixel for creating PxTone Collage, Cave Story (Doukutsu Monogatari),
+and contributing this unique chiptune format to the community.

@@ -1,5 +1,6 @@
 #include "ui_common.h"
 #include "ui_animations.h"
+#include "ui_status.h"
 #include <string.h>
 #include <math.h>
 
@@ -89,8 +90,9 @@ void draw_player_panel(int y, int x, int h, int w) {
         int bar_w = (x + w - 2) - bar_start;
         
         if (bar_w > 2) {
-            float progress = (tot_sec > 0) ? (float)cur_sec / tot_sec : 0.0f;
+            float progress = (tot_sec > 0) ? ((float)cur_sec / (float)tot_sec) : 0.0f;
             if (progress > 1.0f) progress = 1.0f;
+            if (progress < 0.0f) progress = 0.0f;
             
             int inner_w = bar_w - 2; // Subtract space for [ and ]
             int filled_w = (int)(progress * inner_w);
@@ -116,7 +118,7 @@ void draw_player_panel(int y, int x, int h, int w) {
     }
     
     // VU-meter
-    if (h >= 5) {
+    if (h >= 5 && w >= 22) {
         int vu_y = y + 3;
         int center_x = x + (w / 2);
         
@@ -124,10 +126,12 @@ void draw_player_panel(int y, int x, int h, int w) {
         if (srate == 0) srate = 44100;
         uint32_t vu_window = (srate * 50u) / 1000u; // 50ms window
         float peak_l = 0.0f, peak_r = 0.0f;
-        for (uint32_t i = 0; i < vu_window; i++) {
+        // Step by 2
+        for (uint32_t i = 0; i < vu_window; i += 2) {
             if (i > ui_cache.smooth_rpos) break;
             uint32_t idx = (ui_cache.smooth_rpos - i) & VIS_BUF_MASK;
-            float l = fabsf(vis_ring_l[idx]); float r = fabsf(vis_ring_r[idx]);
+            float l = vis_ring_l[idx]; if (l < 0.0f) l = -l;
+            float r = vis_ring_r[idx]; if (r < 0.0f) r = -r;
             if (l > peak_l) peak_l = l;
             if (r > peak_r) peak_r = r;
         }
@@ -136,20 +140,32 @@ void draw_player_panel(int y, int x, int h, int w) {
         int clip_r = (peak_r > 1.0f);
         
         static int clip_hold_l = 0; static int clip_hold_r = 0;
-        if (clip_l) clip_hold_l = 20; else if (clip_hold_l > 0) clip_hold_l--;
-        if (clip_r) clip_hold_r = 20; else if (clip_hold_r > 0) clip_hold_r--;
-
-        float db_l = (peak_l < 0.001f) ? -60.0f : 20.0f * log10f(peak_l);
-        float db_r = (peak_r < 0.001f) ? -60.0f : 20.0f * log10f(peak_r);
-        peak_l = (db_l + 40.0f) / 40.0f; peak_r = (db_r + 40.0f) / 40.0f;
-        if (peak_l < 0.0f) peak_l = 0.0f;
-        if (peak_l > 1.0f) peak_l = 1.0f;
-        if (peak_r < 0.0f) peak_r = 0.0f;
-        if (peak_r > 1.0f) peak_r = 1.0f;
-
         static float smooth_peak_l = 0.0f; static float smooth_peak_r = 0.0f;
-        if (peak_l > smooth_peak_l) smooth_peak_l = peak_l; else { smooth_peak_l -= 0.03f; if (smooth_peak_l < 0.0f) smooth_peak_l = 0.0f; }
-        if (peak_r > smooth_peak_r) smooth_peak_r = peak_r; else { smooth_peak_r -= 0.03f; if (smooth_peak_r < 0.0f) smooth_peak_r = 0.0f; }
+        PlayState st = (PlayState)atomic_load(&play_state_atomic);
+
+        if (st == STATE_PLAYING) {
+            if (clip_l) clip_hold_l = 20; else if (clip_hold_l > 0) clip_hold_l--;
+            if (clip_r) clip_hold_r = 20; else if (clip_hold_r > 0) clip_hold_r--;
+
+            float db_l = (peak_l < 0.001f) ? -60.0f : 20.0f * log10f(peak_l);
+            float db_r = (peak_r < 0.001f) ? -60.0f : 20.0f * log10f(peak_r);
+            peak_l = (db_l + 40.0f) / 40.0f; peak_r = (db_r + 40.0f) / 40.0f;
+            if (peak_l < 0.0f) peak_l = 0.0f;
+            if (peak_l > 1.0f) peak_l = 1.0f;
+            if (peak_r < 0.0f) peak_r = 0.0f;
+            if (peak_r > 1.0f) peak_r = 1.0f;
+
+            if (peak_l >= smooth_peak_l) smooth_peak_l = peak_l; 
+            else { smooth_peak_l -= 0.03f; if (smooth_peak_l < 0.0f) smooth_peak_l = 0.0f; }
+
+            if (peak_r >= smooth_peak_r) smooth_peak_r = peak_r; 
+            else { smooth_peak_r -= 0.03f; if (smooth_peak_r < 0.0f) smooth_peak_r = 0.0f; }
+        } else if (st == STATE_STOPPED) {
+            clip_hold_l = 0;
+            clip_hold_r = 0;
+            smooth_peak_l = 0.0f;
+            smooth_peak_r = 0.0f;
+        }
 
         int bar_len = (w - 10) / 2;
         if (bar_len > 24) bar_len = 24;
@@ -182,4 +198,7 @@ void draw_player_panel(int y, int x, int h, int w) {
         mvaddstr(vu_y, center_x + 1 + bar_len, " ");
         if (clip_hold_r > 0) attroff(COLOR_PAIR(10) | A_REVERSE);
     }
+
+    // Render the non-shifting status highlight over the bottom border if active
+    ui_status_render(y, x, h, w);
 }
