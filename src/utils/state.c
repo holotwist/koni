@@ -2,6 +2,7 @@
 #include "ui_common.h"
 #include "equalizer.h"
 #include "krystal_engine.h"
+#include "listening_profile.h"
 
 pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -86,6 +87,108 @@ atomic_int volume = 100;
 atomic_int seek_target_ms = -1;
 atomic_int play_mode_shuffle = 0;
 atomic_int play_mode_repeat = 0; // 0=Off, 1=All, 2=One
+atomic_int shuffle_algorithm = SHUFFLE_ALG_FISHER_YATES;
+
+// Non-repeating shuffle deck state
+static int *s_shuffle_deck = NULL;
+static int s_shuffle_deck_size = 0;
+static int s_shuffle_deck_pos = 0;
+static PlaybackSource s_shuffle_deck_source = SOURCE_NONE;
+
+static void rebuild_shuffle_deck(PlaybackSource src, int total_items, int current_idx) {
+    if (total_items <= 0) {
+        if (s_shuffle_deck) { free(s_shuffle_deck); s_shuffle_deck = NULL; }
+        s_shuffle_deck_size = 0;
+        s_shuffle_deck_pos = 0;
+        return;
+    }
+
+    if (s_shuffle_deck_size != total_items) {
+        s_shuffle_deck = realloc(s_shuffle_deck, sizeof(int) * total_items);
+        s_shuffle_deck_size = total_items;
+    }
+
+    for (int i = 0; i < total_items; i++) s_shuffle_deck[i] = i;
+    s_shuffle_deck_source = src;
+
+    // Fisher-Yates permutation
+    for (int i = total_items - 1; i > 0; i--) {
+        int j = rand() % (i + 1);
+        int tmp = s_shuffle_deck[i];
+        s_shuffle_deck[i] = s_shuffle_deck[j];
+        s_shuffle_deck[j] = tmp;
+    }
+
+    // Artist-spaced balancing, avoid adjacent tracks with the same artist
+    ShuffleAlgorithm alg = (ShuffleAlgorithm)atomic_load(&shuffle_algorithm);
+    if (alg == SHUFFLE_ALG_BALANCED && total_items > 4 && src == SOURCE_LIBRARY && library_tracks) {
+        for (int i = 0; i < total_items - 1; i++) {
+            int t1 = s_shuffle_deck[i];
+            int t2 = s_shuffle_deck[i + 1];
+            const char *a1 = library_tracks[t1].artist;
+            const char *a2 = library_tracks[t2].artist;
+            if (a1 && a2 && a1[0] && strcmp(a1, a2) == 0) {
+                // Swap t2 with a later track of a different artist
+                for (int k = i + 2; k < total_items; k++) {
+                    int tk = s_shuffle_deck[k];
+                    const char *ak = library_tracks[tk].artist;
+                    if (!ak || strcmp(a1, ak) != 0) {
+                        s_shuffle_deck[i + 1] = tk;
+                        s_shuffle_deck[k] = t2;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Prevent immediate repeat of the current track at deck start
+    if (total_items > 1 && s_shuffle_deck[0] == current_idx) {
+        int tmp = s_shuffle_deck[0];
+        s_shuffle_deck[0] = s_shuffle_deck[1];
+        s_shuffle_deck[1] = tmp;
+    }
+
+    s_shuffle_deck_pos = 0;
+}
+
+static int get_next_shuffled_index(PlaybackSource src, int total_items, int current_idx) {
+    if (total_items <= 0) return -1;
+    ShuffleAlgorithm alg = (ShuffleAlgorithm)atomic_load(&shuffle_algorithm);
+
+    if (alg == SHUFFLE_ALG_RANDOM) {
+        return rand() % total_items;
+    }
+
+    if (alg == SHUFFLE_ALG_WEIGHTED) {
+        const char **paths = malloc(sizeof(char*) * total_items);
+        if (paths) {
+            for (int i = 0; i < total_items; i++) {
+                if (src == SOURCE_LIBRARY && library_tracks) paths[i] = library_tracks[i].path;
+                else if (src == SOURCE_QUEUE && playlist) paths[i] = playlist[i].path;
+                else if (src == SOURCE_PLAYLIST && active_playlist_playback.paths) paths[i] = active_playlist_playback.paths[i];
+                else paths[i] = "";
+            }
+
+            // Query current track energy to drive acoustic continuity
+            float target_energy = -1.0f;
+            if (current_idx >= 0 && current_idx < total_items) {
+                target_energy = 0.5f;
+            }
+
+            int picked = listening_profile_pick_weighted(paths, total_items, target_energy);
+            free(paths);
+            return picked;
+        }
+    }
+
+    if (!s_shuffle_deck || s_shuffle_deck_size != total_items ||
+        s_shuffle_deck_source != src || s_shuffle_deck_pos >= s_shuffle_deck_size) {
+        rebuild_shuffle_deck(src, total_items, current_idx);
+    }
+
+    return s_shuffle_deck[s_shuffle_deck_pos++];
+}
 
 int play_history[256] = {0};
 int history_len = 0;
@@ -207,6 +310,7 @@ void load_state(void) {
             if (strcmp(key, "current_dir") == 0) strncpy(current_dir, val, sizeof(current_dir)-1);
             else if (strcmp(key, "volume") == 0) atomic_store(&volume, atoi(val));
             else if (strcmp(key, "shuffle") == 0) atomic_store(&play_mode_shuffle, atoi(val));
+            else if (strcmp(key, "shuffle_alg") == 0) atomic_store(&shuffle_algorithm, atoi(val));
             else if (strcmp(key, "repeat") == 0) atomic_store(&play_mode_repeat, atoi(val));
             else if (strcmp(key, "rgain") == 0) atomic_store(&play_mode_rgain, atoi(val));
             else if (strcmp(key, "vis_mode") == 0) current_vis_mode = atoi(val);
@@ -279,6 +383,7 @@ void save_state(void) {
     fprintf(f, "current_dir=%s\n", current_dir);
     fprintf(f, "volume=%d\n", atomic_load(&volume));
     fprintf(f, "shuffle=%d\n", atomic_load(&play_mode_shuffle));
+    fprintf(f, "shuffle_alg=%d\n", atomic_load(&shuffle_algorithm));
     fprintf(f, "repeat=%d\n", atomic_load(&play_mode_repeat));
     fprintf(f, "rgain=%d\n", atomic_load(&play_mode_rgain));
     fprintf(f, "vis_mode=%d\n", current_vis_mode);
@@ -363,7 +468,7 @@ bool player_peek_next_track(char *out_path, size_t path_sz, char *out_name, size
             if (repeat_mode == REPEAT_ONE) {
                 next_idx = current_idx;
             } else if (shuffle) {
-                next_idx = rand() % total_items;
+                next_idx = get_next_shuffled_index(src, total_items, current_idx);
             } else {
                 next_idx = current_idx + 1;
                 if (next_idx >= total_items) {
@@ -506,7 +611,7 @@ bool player_advance_track(PlayerCommand cmd) {
                 next_idx = play_history[history_idx];
             } else {
                 if (shuffle) {
-                    next_idx = rand() % total_items;
+                    next_idx = get_next_shuffled_index(current_play_source, total_items, playing_file_idx);
                 } else {
                     next_idx = playing_file_idx + 1;
                     if (next_idx >= total_items) {

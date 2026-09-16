@@ -84,3 +84,4 @@ const KoniCodecImpl ogg_codec_impl = {
     .get_interface = NULL,
     .control = NULL
 };
+REGISTER_KONI_CODEC(ogg_codec_impl);

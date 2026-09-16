@@ -80,4 +80,13 @@ const KoniCodecImpl* koni_find_codec_by_ext(const char* filepath);
 bool koni_is_supported_extension(const char* ext);
 void koni_metadata_free(KoniMetadata* meta);
 
+// Autoregister codec from its translation unit into the "koni_codecs" section
+#if defined(__GNUC__) || defined(__clang__)
+  #define REGISTER_KONI_CODEC(impl) \
+      __attribute__((used, section("koni_codecs"), aligned(sizeof(void*)))) \
+      static const KoniCodecImpl* const __koni_codec_ptr_##impl = &(impl)
+#else
+  #error "GCC or Clang required for linker section autoregistration"
+#endif
+
 #endif // KONI_CODEC_H

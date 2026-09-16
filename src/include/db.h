@@ -28,6 +28,7 @@ bool db_get_track_meta(const char *filepath, time_t mtime, KoniMetadata *out_met
 bool db_upsert_track(const char *filepath, time_t mtime, const KoniMetadata *meta, uint32_t duration_sec);
 void db_delete_track(const char *filepath);
 void db_prune_missing_files(void);
+void db_rebuild_library(void);
 
 typedef enum {
     DB_SORT_TITLE = 0,

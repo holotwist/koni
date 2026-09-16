@@ -126,10 +126,10 @@ static void append_metadata_variant(DBusMessageIter *iter)
     pthread_mutex_lock(&state_mutex);
 
     int track_id = atomic_load(&current_track_id);
-    if (track_id > 0 && playing_file_idx >= 0)
+    if ((track_id > 0 || playing_filepath[0] != '\0') && (playing_file_idx >= 0 || playing_filepath[0] != '\0'))
     {
         char track_path[128];
-        snprintf(track_path, sizeof(track_path), "/org/mpris/MediaPlayer2/Track/%d", track_id);
+        snprintf(track_path, sizeof(track_path), "/org/mpris/MediaPlayer2/Track/%d", track_id > 0 ? track_id : 1);
         const char *track_id_key = "mpris:trackid";
         const char *track_id_val = track_path;
 
@@ -201,12 +201,43 @@ static void append_metadata_variant(DBusMessageIter *iter)
             dbus_message_iter_close_container(&dict, &dict_entry);
         }
         
-        if (p_metadata.art_url && strlen(p_metadata.art_url) > 0)
+        const char *art_url = p_metadata.art_url;
+        char folder_art_url[1100] = {0};
+        if ((!art_url || art_url[0] == '\0') && playing_filepath[0] != '\0')
+        {
+            char dir[1024];
+            strncpy(dir, playing_filepath, sizeof(dir) - 1);
+            dir[sizeof(dir) - 1] = '\0';
+            char *slash = strrchr(dir, '/');
+            if (slash)
+            {
+                *slash = '\0';
+                static const char *cover_names[] = {
+                    "cover.jpg", "cover.png", "cover.jpeg",
+                    "folder.jpg", "folder.png", "folder.jpeg",
+                    "front.jpg", "front.png", "front.jpeg",
+                    "album.jpg", "album.png", NULL
+                };
+                for (int i = 0; cover_names[i] != NULL; i++)
+                {
+                    char test_path[1024];
+                    snprintf(test_path, sizeof(test_path), "%s/%s", dir, cover_names[i]);
+                    if (access(test_path, R_OK) == 0)
+                    {
+                        snprintf(folder_art_url, sizeof(folder_art_url), "file://%s", test_path);
+                        art_url = folder_art_url;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (art_url && strlen(art_url) > 0)
         {
             dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY, NULL, &dict_entry);
             const char *art_key = "mpris:artUrl";
             dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &art_key);
-            append_variant_string(&dict_entry, p_metadata.art_url);
+            append_variant_string(&dict_entry, art_url);
             dbus_message_iter_close_container(&dict, &dict_entry);
         }
     }
@@ -323,7 +354,7 @@ static DBusHandlerResult mpris_handle_methods(DBusConnection *conn, DBusMessage 
 
     if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Player", "PlayPause"))
     {
-        if (atomic_load(&play_state_atomic) == STATE_STOPPED && playing_file_idx >= 0)
+        if (atomic_load(&play_state_atomic) == STATE_STOPPED && (playing_file_idx >= 0 || playing_filepath[0] != '\0'))
         {
             atomic_store(&current_cmd_atomic, CMD_PLAY);
         }
@@ -334,7 +365,7 @@ static DBusHandlerResult mpris_handle_methods(DBusConnection *conn, DBusMessage 
     }
     else if (dbus_message_is_method_call(msg, "org.mpris.MediaPlayer2.Player", "Play"))
     {
-        if (atomic_load(&play_state_atomic) == STATE_STOPPED && playing_file_idx >= 0)
+        if (atomic_load(&play_state_atomic) == STATE_STOPPED && (playing_file_idx >= 0 || playing_filepath[0] != '\0'))
         {
             atomic_store(&current_cmd_atomic, CMD_PLAY);
         }
@@ -750,8 +781,8 @@ static void *mpris_thread_func(void *arg)
 {
     (void)arg;
     
-    // Do not register on DBus until the user plays a song
-    while (mpris_running && atomic_load(&current_track_id) == 0) {
+    // Wait until track context is established
+    while (mpris_running && atomic_load(&current_track_id) == 0 && playing_filepath[0] == '\0') {
         usleep(100000);
     }
     
@@ -770,18 +801,24 @@ static void *mpris_thread_func(void *arg)
     if (dbus_conn == NULL)
         return NULL;
 
-    char bus_name[256];
-    snprintf(bus_name, sizeof(bus_name), "org.mpris.MediaPlayer2.koni.instance%d", getpid());
-    int ret = dbus_bus_request_name(dbus_conn, bus_name, DBUS_NAME_FLAG_REPLACE_EXISTING, &err);
-    if (dbus_error_is_set(&err))
-    {
-        fprintf(stderr, "MPRIS DBus Name Error: %s\n", err.message);
+    // Try claiming default well-known name; fallback to PID-suffixed name if occupied
+    int ret = dbus_bus_request_name(dbus_conn, "org.mpris.MediaPlayer2.koni", DBUS_NAME_FLAG_DO_NOT_QUEUE, &err);
+    if (dbus_error_is_set(&err)) {
         dbus_error_free(&err);
-        return NULL;
+        ret = -1;
     }
 
-    if (ret != DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER)
-        return NULL;
+    if (ret != DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER) {
+        char bus_name[256];
+        snprintf(bus_name, sizeof(bus_name), "org.mpris.MediaPlayer2.koni.instance%d", getpid());
+        ret = dbus_bus_request_name(dbus_conn, bus_name, DBUS_NAME_FLAG_REPLACE_EXISTING, &err);
+        if (dbus_error_is_set(&err)) {
+            fprintf(stderr, "MPRIS DBus Name Error: %s\n", err.message);
+            dbus_error_free(&err);
+            return NULL;
+        }
+        if (ret != DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER) return NULL;
+    }
 
     dbus_connection_add_filter(dbus_conn, mpris_handle_methods, NULL, NULL);
 
@@ -789,6 +826,7 @@ static void *mpris_thread_func(void *arg)
     int last_track = -1;
     int last_repeat = -1;
     int last_shuffle = -1;
+    int last_volume = -1;
 
     while (mpris_running)
     {
@@ -799,6 +837,7 @@ static void *mpris_thread_func(void *arg)
         int current_track = atomic_load(&current_track_id);
         int current_repeat = atomic_load(&play_mode_repeat);
         int current_shuffle = atomic_load(&play_mode_shuffle);
+        int current_vol = atomic_load(&volume);
 
         // Check for sudden jumps to emit Seeked signal
         uint32_t srate = atomic_load(&vis_srate);
@@ -818,17 +857,20 @@ static void *mpris_thread_func(void *arg)
 
         // Detects changes internally to broadcast properties
         if (current_state != last_state || current_track != last_track ||
-            current_repeat != last_repeat || current_shuffle != last_shuffle)
+            current_repeat != last_repeat || current_shuffle != last_shuffle ||
+            current_vol != last_volume)
         {
 
             bool state_changed = (current_state != last_state || current_track != last_track);
             bool repeat_changed = (current_repeat != last_repeat);
             bool shuffle_changed = (current_shuffle != last_shuffle);
+            bool volume_changed = (current_vol != last_volume);
 
             last_state = current_state;
             last_track = current_track;
             last_repeat = current_repeat;
             last_shuffle = current_shuffle;
+            last_volume = current_vol;
 
             DBusMessage *sig = dbus_message_new_signal(
                 "/org/mpris/MediaPlayer2",
@@ -878,6 +920,19 @@ static void *mpris_thread_func(void *arg)
                     dbus_message_iter_open_container(&dict_entry, DBUS_TYPE_VARIANT, "b", &variant);
                     dbus_bool_t shuf_val = current_shuffle ? TRUE : FALSE;
                     dbus_message_iter_append_basic(&variant, DBUS_TYPE_BOOLEAN, &shuf_val);
+                    dbus_message_iter_close_container(&dict_entry, &variant);
+                    dbus_message_iter_close_container(&array, &dict_entry);
+                }
+
+                if (volume_changed)
+                {
+                    dbus_message_iter_open_container(&array, DBUS_TYPE_DICT_ENTRY, NULL, &dict_entry);
+                    const char *vol_key = "Volume";
+                    dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &vol_key);
+                    DBusMessageIter variant;
+                    dbus_message_iter_open_container(&dict_entry, DBUS_TYPE_VARIANT, "d", &variant);
+                    double vol_d = (double)current_vol / 100.0;
+                    dbus_message_iter_append_basic(&variant, DBUS_TYPE_DOUBLE, &vol_d);
                     dbus_message_iter_close_container(&dict_entry, &variant);
                     dbus_message_iter_close_container(&array, &dict_entry);
                 }

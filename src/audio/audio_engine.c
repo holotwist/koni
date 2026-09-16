@@ -4,6 +4,7 @@
 #include "stream_reader.h"
 #include "dsp_rack.h"
 #include "krystal_engine.h"
+#include "listening_profile.h"
 #include "state.h"
 
 #include <stdio.h>
@@ -11,6 +12,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <math.h>
 
 #define CHUNK_FRAMES 16384
 
@@ -112,6 +114,7 @@ void *audio_thread_func(void *arg) {
 
             atomic_store(&current_cmd_atomic, CMD_NONE);
             atomic_store(&play_state_atomic, STATE_PLAYING);
+            listening_profile_on_track_start(cur_stream.filepath, cur_stream.meta.title, cur_stream.meta.artist);
 
             dsp_rack_reset();
             atomic_store(&vis_wpos, 0);
@@ -251,6 +254,17 @@ void *audio_thread_func(void *arg) {
                 }
             }
 
+            // Track reached natural completion
+            if (cur_stream.reached_eof && !gapless_active && !cur_stream.profile_logged) {
+                uint32_t played_sec = atomic_load(&p_current_sec);
+                uint32_t total_sec = atomic_load(&p_total_sec);
+                float rms = cur_stream.energy_samples > 0 ? sqrtf(cur_stream.energy_accum / (float)cur_stream.energy_samples) : 0.15f;
+                float norm_energy = fminf(1.0f, rms * 3.5f);
+
+                listening_profile_on_track_end(cur_stream.filepath, played_sec, total_sec, norm_energy);
+                cur_stream.profile_logged = true;
+            }
+
             // Exit when all decoded samples finish playing through hardware
             if (mix_samples == 0) {
                 if (cur_stream.reached_eof && !gapless_active) {
@@ -266,6 +280,15 @@ void *audio_thread_func(void *arg) {
             dsp_rack_process(interleaved, float_output, mix_samples, cur_stream.fmt.num_channels,
                              cur_stream.fmt.sample_rate, &cur_stream.rgain_state,
                              atomic_load(&play_mode_rgain), atomic_load(&volume));
+
+            // Accumulate raw PCM RMS energy for listening profile without DSP bias
+            uint32_t total_frame_samples = mix_samples * cur_stream.fmt.num_channels;
+            float chunk_sum = 0.0f;
+            for (uint32_t s = 0; s < total_frame_samples; s += 2) {
+                chunk_sum += float_output[s] * float_output[s];
+            }
+            cur_stream.energy_accum += chunk_sum;
+            cur_stream.energy_samples += (total_frame_samples / 2);
 
             // Feed into hardware output ring buffer
             uint32_t written = 0;

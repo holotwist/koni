@@ -164,6 +164,22 @@ bool ui_handle_input(int ch) {
         return true;
     }
 
+    // Obligatory prompt for local listening profile collection
+    if (!app_config.listening_profile_asked) {
+        if (ch == 'y' || ch == 'Y') {
+            app_config.enable_listening_profile = true;
+            app_config.listening_profile_asked = true;
+            config_save();
+            return true;
+        } else if (ch == 'n' || ch == 'N' || ch == 27) {
+            app_config.enable_listening_profile = false;
+            app_config.listening_profile_asked = true;
+            config_save();
+            return true;
+        }
+        return true; // Block other inputs until answered
+    }
+
     // Handle active confirmation dialog for folder selection
     if (folder_dialog.active) {
         if (ch == 'y' || ch == 'Y') {

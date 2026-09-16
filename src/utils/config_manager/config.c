@@ -122,6 +122,14 @@ static void parse_ini_file(const char* filepath, const char* home) {
                 } else {
                     app_config.lyrics_custom_path = strdup(val);
                 }
+            } else if (strcmp(key, "profile.enabled") == 0 || strcmp(key, "listening_profile") == 0) {
+                if (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0 || strcasecmp(val, "yes") == 0) {
+                    app_config.enable_listening_profile = true;
+                    app_config.listening_profile_asked = true;
+                } else if (strcasecmp(val, "false") == 0 || strcmp(val, "0") == 0 || strcasecmp(val, "no") == 0) {
+                    app_config.enable_listening_profile = false;
+                    app_config.listening_profile_asked = true;
+                }
             } else if (strcmp(key, "lyrics.online") == 0 || (section == 2 && strcmp(key, "online") == 0)) {
                 if (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0 || strcasecmp(val, "yes") == 0) {
                     app_config.online_lyrics = true;
@@ -281,6 +289,8 @@ void config_init(void) {
     app_config.online_lyrics_asked = false;
     app_config.download_online_lyrics = false;
     app_config.download_online_lyrics_asked = false;
+    app_config.enable_listening_profile = false;
+    app_config.listening_profile_asked = false;
     app_config.music_dirs = NULL;
     app_config.num_music_dirs = 0;
     app_config.music_dirs_capacity = 0;
@@ -542,6 +552,9 @@ void config_save(void) {
     }
     if (app_config.download_online_lyrics_asked) {
         upsert_ini_key(filepath, "lyrics.download_online", app_config.download_online_lyrics ? "true" : "false");
+    }
+    if (app_config.listening_profile_asked) {
+        upsert_ini_key(filepath, "profile.enabled", app_config.enable_listening_profile ? "true" : "false");
     }
 
     free(filepath);

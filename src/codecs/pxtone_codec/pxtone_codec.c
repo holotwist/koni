@@ -258,3 +258,4 @@ const KoniCodecImpl pxtone_codec_impl = {
     .get_interface = pxtn_codec_get_interface,
     .control = NULL
 };
+REGISTER_KONI_CODEC(pxtone_codec_impl);

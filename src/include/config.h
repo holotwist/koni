@@ -13,6 +13,8 @@ typedef struct {
     int music_dirs_capacity;
     bool download_online_lyrics;
     bool download_online_lyrics_asked;
+    bool enable_listening_profile;
+    bool listening_profile_asked;
 } KoniConfig;
 
 extern KoniConfig app_config;

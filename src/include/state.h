@@ -67,6 +67,14 @@ typedef enum {
     REPEAT_ONE
 } RepeatMode;
 
+typedef enum {
+    SHUFFLE_ALG_RANDOM = 0,
+    SHUFFLE_ALG_FISHER_YATES,
+    SHUFFLE_ALG_BALANCED,
+    SHUFFLE_ALG_WEIGHTED,
+    SHUFFLE_ALG_COUNT
+} ShuffleAlgorithm;
+
 // Shared Globals 
 extern pthread_mutex_t state_mutex;
 
@@ -150,6 +158,7 @@ extern atomic_int  volume;
 extern atomic_int  seek_target_ms;
 extern atomic_int  play_mode_shuffle;
 extern atomic_int  play_mode_repeat;
+extern atomic_int  shuffle_algorithm;
 
 extern int play_history[256];
 extern int history_len;

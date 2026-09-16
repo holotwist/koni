@@ -1,3 +1,6 @@
+#define _DEFAULT_SOURCE
+#define _GNU_SOURCE
+
 #include "codec.h"
 #include "miniaudio.h"
 #include <string.h>
@@ -186,12 +189,30 @@ static void parse_id3v2(FILE* fp, uint8_t magic[4], KoniMetadata* meta) {
         
         if (frame_size > 0) {
             uint8_t* frame_data = tag_data + pos;
-            if (id == 0x54495432 && !meta->title) { // TIT2
+            if (id == 0x54495432) { // TIT2
+                if (meta->title) free(meta->title);
                 meta->title = decode_id3_string(frame_data + 1, frame_size - 1, frame_data[0]);
-            } else if (id == 0x54504531 && !meta->artist) { // TPE1
+            } else if (id == 0x54504531) { // TPE1
+                if (meta->artist) free(meta->artist);
                 meta->artist = decode_id3_string(frame_data + 1, frame_size - 1, frame_data[0]);
-            } else if (id == 0x54414C42 && !meta->album) { // TALB
+            } else if (id == 0x54414C42) { // TALB
+                if (meta->album) free(meta->album);
                 meta->album = decode_id3_string(frame_data + 1, frame_size - 1, frame_data[0]);
+            } else if (id == 0x55534C54 && !meta->lyrics) { // USLT (Unsynced lyrics)
+                uint8_t enc = frame_data[0];
+                size_t p = 4; // skip encoding (1) + language (3)
+                if (p < frame_size) {
+                    if (enc == 1 || enc == 2) {
+                        while (p + 1 < frame_size && (frame_data[p] != 0 || frame_data[p + 1] != 0)) p += 2;
+                        p += 2;
+                    } else {
+                        while (p < frame_size && frame_data[p] != 0) p++;
+                        p += 1;
+                    }
+                    if (p < frame_size) {
+                        meta->lyrics = decode_id3_string(frame_data + p, frame_size - p, enc);
+                    }
+                }
             } else if (id == 0x54585858) { // TXXX
                 uint8_t enc = frame_data[0];
                 size_t d_len = 0;
@@ -211,25 +232,20 @@ static void parse_id3v2(FILE* fp, uint8_t magic[4], KoniMetadata* meta) {
                 if (desc) free(desc);
                 if (val) free(val);
             } else if (id == 0x41504943 && !meta->art_url) { // APIC
-                uint8_t enc = frame_data[0];
-                size_t p = 1;
-                while (p < frame_size && frame_data[p] != 0) p++;
-                p++;
-                if (p < frame_size) {
-                    p++;
-                    if (enc == 1 || enc == 2) {
-                        while (p + 1 < frame_size) {
-                            if (frame_data[p] == 0 && frame_data[p+1] == 0) break;
-                            p++;
-                        }
-                        p += 2;
-                    } else {
-                        while (p < frame_size && frame_data[p] != 0) p++;
-                        p++;
+                // Directly locate JPEG or PNG magic header bytes to guarantee valid image alignment
+                size_t img_offset = 0;
+                for (size_t k = 1; k + 3 < frame_size; k++) {
+                    if (frame_data[k] == 0xFF && frame_data[k+1] == 0xD8 && frame_data[k+2] == 0xFF) {
+                        img_offset = k;
+                        break;
                     }
-                    if (p < frame_size) {
-                        meta->art_url = save_temp_cover(frame_data + p, frame_size - p);
+                    if (frame_data[k] == 0x89 && frame_data[k+1] == 'P' && frame_data[k+2] == 'N' && frame_data[k+3] == 'G') {
+                        img_offset = k;
+                        break;
                     }
+                }
+                if (img_offset > 0 && img_offset < frame_size) {
+                    meta->art_url = save_temp_cover(frame_data + img_offset, frame_size - img_offset);
                 }
             }
         }
@@ -350,6 +366,110 @@ static void parse_flac(FILE* fp, KoniMetadata* meta) {
     }
 }
 
+static char* clean_riff_string(const uint8_t* data, size_t size) {
+    if (!data || size == 0) return NULL;
+    while (size > 0 && (data[size - 1] == '\0' || data[size - 1] == ' ' || data[size - 1] == '\r' || data[size - 1] == '\n')) {
+        size--;
+    }
+    if (size == 0) return NULL;
+
+    bool is_utf8 = true;
+    for (size_t i = 0; i < size; i++) {
+        uint8_t c = data[i];
+        if (c < 0x80) continue;
+        if ((c >= 0xC2 && c <= 0xDF) && (i + 1 < size) && (data[i+1] >= 0x80 && data[i+1] <= 0xBF)) {
+            i += 1;
+        } else if ((c >= 0xE0 && c <= 0xEF) && (i + 2 < size) &&
+                   (data[i+1] >= 0x80 && data[i+1] <= 0xBF) && (data[i+2] >= 0x80 && data[i+2] <= 0xBF)) {
+            i += 2;
+        } else if ((c >= 0xF0 && c <= 0xF4) && (i + 3 < size) &&
+                   (data[i+1] >= 0x80 && data[i+1] <= 0xBF) &&
+                   (data[i+2] >= 0x80 && data[i+2] <= 0xBF) && (data[i+3] >= 0x80 && data[i+3] <= 0xBF)) {
+            i += 3;
+        } else {
+            is_utf8 = false;
+            break;
+        }
+    }
+
+    if (is_utf8) {
+        char *s = malloc(size + 1);
+        if (s) {
+            memcpy(s, data, size);
+            s[size] = '\0';
+        }
+        return s;
+    }
+    return decode_id3_string(data, size, 0);
+}
+
+static void parse_riff_info_list(FILE* fp, off_t list_end, KoniMetadata* meta) {
+    while ((off_t)ftello(fp) + 8 <= list_end) {
+        uint8_t sub_hdr[8];
+        if (fread(sub_hdr, 1, 8, fp) != 8) break;
+        uint32_t sub_size = read_u32_le(sub_hdr + 4);
+        off_t sub_data_pos = ftello(fp);
+        if (sub_size > 0 && sub_size < (1024 * 1024)) {
+            uint8_t *data = malloc(sub_size + 1);
+            if (data) {
+                if (fread(data, 1, sub_size, fp) == sub_size) {
+                    data[sub_size] = '\0';
+                    char *text = clean_riff_string(data, sub_size);
+                    if (text && text[0]) {
+                        if (memcmp(sub_hdr, "INAM", 4) == 0 && !meta->title) {
+                            meta->title = text;
+                            text = NULL;
+                        } else if (memcmp(sub_hdr, "IART", 4) == 0 && !meta->artist) {
+                            meta->artist = text;
+                            text = NULL;
+                        } else if (memcmp(sub_hdr, "IPRD", 4) == 0 && !meta->album) {
+                            meta->album = text;
+                            text = NULL;
+                        } else if ((memcmp(sub_hdr, "ILRC", 4) == 0 || memcmp(sub_hdr, "ICMT", 4) == 0) && !meta->lyrics) {
+                            meta->lyrics = text;
+                            text = NULL;
+                        }
+                    }
+                    if (text) free(text);
+                }
+                free(data);
+            }
+        }
+        off_t next_sub = sub_data_pos + (off_t)((sub_size + 1ULL) & ~1ULL);
+        if (next_sub < sub_data_pos || fseeko(fp, next_sub, SEEK_SET) != 0) break;
+    }
+}
+
+static void parse_riff_wave(FILE* fp, KoniMetadata* meta) {
+    off_t riff_start = ftello(fp) - 4;
+    if (fseeko(fp, riff_start + 8, SEEK_SET) != 0) return;
+    uint8_t format[4];
+    if (fread(format, 1, 4, fp) != 4) return;
+    if (memcmp(format, "WAVE", 4) != 0) return;
+
+    while (1) {
+        uint8_t chunk_hdr[8];
+        if (fread(chunk_hdr, 1, 8, fp) != 8) break;
+        uint32_t chunk_size = read_u32_le(chunk_hdr + 4);
+        off_t chunk_data_pos = ftello(fp);
+
+        if (memcmp(chunk_hdr, "LIST", 4) == 0 && chunk_size >= 4) {
+            uint8_t list_type[4];
+            if (fread(list_type, 1, 4, fp) == 4 && memcmp(list_type, "INFO", 4) == 0) {
+                parse_riff_info_list(fp, chunk_data_pos + chunk_size, meta);
+            }
+        } else if ((memcmp(chunk_hdr, "id3 ", 4) == 0 || memcmp(chunk_hdr, "ID3 ", 4) == 0) && chunk_size >= 10) {
+            uint8_t id3_magic[4];
+            if (fread(id3_magic, 1, 4, fp) == 4 && memcmp(id3_magic, "ID3", 3) == 0) {
+                parse_id3v2(fp, id3_magic, meta);
+            }
+        }
+
+        off_t next_chunk = chunk_data_pos + (off_t)((chunk_size + 1ULL) & ~1ULL);
+        if (next_chunk < chunk_data_pos || fseeko(fp, next_chunk, SEEK_SET) != 0) break;
+    }
+}
+
 bool ma_read_metadata(const char* filepath, KoniMetadata* meta, uint32_t* duration_sec) {
     memset(meta, 0, sizeof(KoniMetadata));
     if (duration_sec) *duration_sec = 0;
@@ -360,8 +480,15 @@ bool ma_read_metadata(const char* filepath, KoniMetadata* meta, uint32_t* durati
         if (fread(magic, 1, 4, fp) == 4) {
             if (memcmp(magic, "ID3", 3) == 0) {
                 parse_id3v2(fp, magic, meta);
+                uint8_t next_magic[4];
+                if (fread(next_magic, 1, 4, fp) == 4 &&
+                    (memcmp(next_magic, "RIFF", 4) == 0 || memcmp(next_magic, "RF64", 4) == 0)) {
+                    parse_riff_wave(fp, meta);
+                }
             } else if (memcmp(magic, "fLaC", 4) == 0) {
                 parse_flac(fp, meta);
+            } else if (memcmp(magic, "RIFF", 4) == 0 || memcmp(magic, "RF64", 4) == 0) {
+                parse_riff_wave(fp, meta);
             }
         }
         fclose(fp);

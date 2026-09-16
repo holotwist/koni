@@ -14,6 +14,7 @@
 #include "ui_krystal.h"
 #include "krystal_engine.h"
 #include "krystal_preset_manager.h"
+#include "listening_profile.h"
 #include <curl/curl.h>
 
 #include <locale.h>
@@ -42,6 +43,7 @@ int main(int argc, char **argv) {
     playlist_mgmt_init(); // Initialize playlists & favourites
     eq_init(); // Initialize 10-band biquad equalizer
     krystal_init(44100); // Initialize Krystal to Bypass default
+    listening_profile_init();
     ui_eq_init();
     ui_krystal_init();
     krystal_presets_init();
@@ -82,6 +84,7 @@ int main(int argc, char **argv) {
     library_scanner_shutdown();
     save_state(); // Dump state before exiting
     config_save(); // Save configuration
+    listening_profile_shutdown();
     krystal_presets_shutdown();
     file_list_shutdown();
     playlist_mgmt_shutdown();

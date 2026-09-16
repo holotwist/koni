@@ -307,6 +307,7 @@ const KoniCodecImpl dana_codec_impl = {
     .decode = dana_decode,
     .seek = dana_seek
 };
+REGISTER_KONI_CODEC(dana_codec_impl);
 
 #else
 

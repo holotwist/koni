@@ -303,6 +303,28 @@ static void ui_loop(void) {
             }
         }
     }
+
+    // Listening Profile opt-in prompt overlay
+    if (!app_config.listening_profile_asked) {
+        int dw = 62;
+        int dh = 7;
+        int dx = (max_x - dw) / 2;
+        int dy = (draw_max_y - dh) / 2;
+        if (dx < 0) dx = 0;
+        if (dy < 0) dy = 0;
+
+        ui_draw_box(dy, dx, dh, dw, "Listening Profile", 4);
+        for (int row = 1; row < dh - 1; row++) mvhline(dy + row, dx + 1, ' ', dw - 2);
+
+        attron(COLOR_PAIR(2));
+        mvprintw(dy + 2, dx + 3, "Enable local profile tracking to learn favorite songs & hours?");
+        mvprintw(dy + 3, dx + 3, "All data remains offline in ~/.config/koni/profile.db");
+        attroff(COLOR_PAIR(2));
+
+        attron(A_BOLD | COLOR_PAIR(4));
+        mvprintw(dy + 5, dx + 3, "[Y] Enable  /  [N] Keep Disabled");
+        attroff(A_BOLD | COLOR_PAIR(4));
+    }
     
     // Overlay safeguard confirmation dialog if active
     if (folder_dialog.active) {

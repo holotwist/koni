@@ -65,3 +65,4 @@ const KoniCodecImpl ma_codec_impl = {
     .decode = ma_decode,
     .seek = ma_seek
 };
+REGISTER_KONI_CODEC(ma_codec_impl);

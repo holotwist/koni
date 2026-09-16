@@ -4,9 +4,23 @@
 #include "extension.h"
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
+
+#include "listening_profile.h"
 
 void stream_reader_close(AudioStream *stream) {
     if (!stream || !stream->is_open) return;
+
+    // Guarantee skip and listen duration recording before stream destruction
+    if (!stream->profile_logged) {
+        uint32_t played_sec = atomic_load(&p_current_sec);
+        uint32_t total_sec = atomic_load(&p_total_sec);
+        float rms = stream->energy_samples > 0 ? sqrtf(stream->energy_accum / (float)stream->energy_samples) : 0.15f;
+        float norm_energy = fminf(1.0f, rms * 3.5f);
+
+        listening_profile_on_track_end(stream->filepath, played_sec, total_sec, norm_energy);
+        stream->profile_logged = true;
+    }
 
     if (active_decoder == stream->dec) {
         pthread_mutex_lock(&state_mutex);
@@ -57,6 +71,9 @@ bool stream_reader_open(AudioStream *stream, const char *path, const char *name,
     stream->meta = meta;
     stream->frames_decoded = 0;
     stream->reached_eof = false;
+    stream->profile_logged = false;
+    stream->energy_accum = 0.0f;
+    stream->energy_samples = 0;
     rgain_init(&stream->rgain_state, fmt.sample_rate, fmt.num_channels);
     rgain_set_meta(&stream->rgain_state, meta.has_track_gain, meta.track_gain);
     stream->is_open = true;

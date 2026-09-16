@@ -202,6 +202,16 @@ void db_delete_track(const char *filepath) {
     pthread_mutex_unlock(&db_mutex);
 }
 
+void db_rebuild_library(void) {
+    pthread_mutex_lock(&db_mutex);
+    if (db) {
+        sqlite3_exec(db, "DELETE FROM tracks;", NULL, NULL, NULL);
+        sqlite3_exec(db, "VACUUM;", NULL, NULL, NULL);
+    }
+    pthread_mutex_unlock(&db_mutex);
+    library_scanner_start();
+}
+
 void db_prune_missing_files(void) {
     pthread_mutex_lock(&db_mutex);
     if (!db) { pthread_mutex_unlock(&db_mutex); return; }

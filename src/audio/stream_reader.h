@@ -18,6 +18,9 @@ typedef struct {
     uint64_t frames_decoded;
     bool reached_eof;
     bool is_open;
+    bool profile_logged;
+    float energy_accum;
+    uint32_t energy_samples;
 } AudioStream;
 
 bool stream_reader_open(AudioStream *stream, const char *path, const char *name, int idx);

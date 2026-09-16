@@ -104,8 +104,22 @@ static int count_m3u_tracks(const char *filepath) {
     return count;
 }
 
+static void ensure_favourites_exists(void) {
+    if (!s_playlist_dir[0]) ensure_playlists_dir();
+    char fav_path[1024];
+    snprintf(fav_path, sizeof(fav_path), "%s/%s.m3u", s_playlist_dir, FAVOURITES_NAME);
+    if (access(fav_path, F_OK) != 0) {
+        FILE *f = fopen(fav_path, "w");
+        if (f) {
+            fprintf(f, "#EXTM3U\n");
+            fclose(f);
+        }
+    }
+}
+
 static void reload_favourites_cache(void) {
     fav_cache_clear();
+    ensure_favourites_exists();
     char fav_path[1024];
     snprintf(fav_path, sizeof(fav_path), "%s/%s.m3u", s_playlist_dir, FAVOURITES_NAME);
     FILE *f = fopen(fav_path, "r");
@@ -219,6 +233,7 @@ bool playlist_mgmt_is_favourite(const char *filepath) {
 bool playlist_mgmt_toggle_favourite(const char *filepath, const char *title, const char *artist, uint32_t duration_sec) {
     if (!filepath || !filepath[0]) return false;
 
+    ensure_favourites_exists();
     bool is_fav = playlist_mgmt_is_favourite(filepath);
     if (is_fav) {
         // Remove track
@@ -302,7 +317,7 @@ bool playlist_mgmt_delete(const char *name) {
 
 bool playlist_mgmt_rename(const char *old_name, const char *new_name) {
     if (!old_name || !new_name || !old_name[0] || !new_name[0]) return false;
-    if (strcasecmp(old_name, FAVOURITES_NAME) == 0) return false;
+    if (strcasecmp(old_name, FAVOURITES_NAME) == 0 || strcasecmp(new_name, FAVOURITES_NAME) == 0) return false;
 
     char src[1024], dst[1024];
     snprintf(src, sizeof(src), "%s/%s.m3u", s_playlist_dir, old_name);
@@ -394,6 +409,7 @@ bool playlist_mgmt_remove_track(const char *playlist_name, int track_index) {
 
 bool playlist_mgmt_load_playlist(const char *name, LoadedPlaylist *out_pl) {
     if (!name || !out_pl) return false;
+    if (strcasecmp(name, FAVOURITES_NAME) == 0) ensure_favourites_exists();
     memset(out_pl, 0, sizeof(LoadedPlaylist));
     strncpy(out_pl->name, name, sizeof(out_pl->name) - 1);
     snprintf(out_pl->filepath, sizeof(out_pl->filepath), "%s/%s.m3u", s_playlist_dir, name);
