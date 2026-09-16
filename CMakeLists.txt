@@ -46,28 +46,12 @@ if(SEMI_STATIC)
         message(STATUS "  [static] ncursesw: ${NCURSESW_STATIC_LIB}")
     endif()
 
-    # curl static
-    if(PKG_CONFIG_FOUND)
-        pkg_check_modules(CURL_STATIC_PKG QUIET STATIC IMPORTED_TARGET libcurl)
-        if(CURL_STATIC_PKG_FOUND)
-            set(CURL_TARGET PkgConfig::CURL_STATIC_PKG)
-            message(STATUS "  [static] cURL: found via pkg-config --static")
-        endif()
     endif()
-    if(NOT CURL_TARGET)
-        find_library(CURL_STATIC_LIB NAMES libcurl.a)
-        if(CURL_STATIC_LIB AND CURL_STATIC_LIB MATCHES "\\.a$")
-            set(CURL_TARGET "${CURL_STATIC_LIB}" ssl crypto z zstd brotlidec nghttp2 idn2 psl)
-            message(STATUS "  [static] cURL: ${CURL_STATIC_LIB}")
-        endif()
-    endif()
-endif()
 
-# Dynamic fallback if static library was not found
-if(NOT CURL_TARGET)
-    find_package(CURL REQUIRED)
-    set(CURL_TARGET ${CURL_LIBRARIES})
-endif()
+# cURL
+find_package(CURL REQUIRED)
+set(CURL_TARGET ${CURL_LIBRARIES})
+
 if(NOT SQLITE3_TARGET)
     find_package(SQLite3 REQUIRED)
     set(SQLITE3_TARGET SQLite3::SQLite3)
