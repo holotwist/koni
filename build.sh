@@ -234,7 +234,7 @@ if [ "$PACKAGE" -eq 1 ]; then
 
         [ -d "resources" ] && cp -r resources "${FULL_STAGE}/"
 
-        for doc in README.md LICENSE LICENSE.txt NOTICE.txt src/codecs/pxtone_codec/NOTICE.txt; do
+        for doc in README.md LICENSE LICENSE.txt NOTICE.txt CREDITS.md src/codecs/pxtone_codec/NOTICE.txt; do
             [ -f "$doc" ] && cp "$doc" "${FULL_STAGE}/"
         done
 
