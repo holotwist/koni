@@ -21,6 +21,7 @@
 #include "widgets/sparkles_radial_list.h"
 #include "modals/sparkles_settings.h"
 #include "protocols/mpris.h"
+#include "input/sparkles_input.h"
 #include <curl/curl.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -32,6 +33,9 @@ typedef enum {
 } SparklesViewMode;
 
 static SparklesViewMode s_view_mode = SPARKLES_VIEW_PLAYER;
+static bool s_show_lyrics_modal = false;
+static int s_lyrics_modal_step = 0;
+static bool s_show_quit_modal = false;
 
 int main(int argc, char **argv) {
     (void)argc; (void)argv;
@@ -74,28 +78,122 @@ int main(int argc, char **argv) {
     sparkles_radial_list_init();
     sparkles_player_view_init();
     sparkles_settings_init();
+    sparkles_input_init();
     SparklesGrid grid;
     sparkles_grid_init(&grid);
 
     while (!WindowShouldClose()) {
-        float sw = (float)GetScreenWidth();
-        float sh = (float)GetScreenHeight();
+        float dt = GetFrameTime();
 
         bool is_searching = tile_song_list_is_searching() || tile_playlists_is_searching() ||
                             sparkles_radial_list_is_open() || sparkles_vis_picker_is_open() ||
-                            sparkles_settings_is_open();
+                            sparkles_settings_is_open() || sparkles_input_is_text_active() ||
+                            s_show_quit_modal;
+        sparkles_input_set_text_focused(is_searching);
+        sparkles_input_update(dt);
+        float sw = (float)GetScreenWidth();
+        float sh = (float)GetScreenHeight();
 
-        // Lyrics and profile permission modal states
-        static bool s_show_lyrics_modal = false;
-        static int s_lyrics_modal_step = 0; // 0 = allow online, 1 = allow save locally
+        // Process semantic action queue
+        SparklesActionType act;
+        while (sparkles_input_poll_action(&act)) {
+            switch (act) {
+                case SPARKLES_ACTION_BACK:
+                    if (s_show_quit_modal) s_show_quit_modal = false;
+                    else if (sparkles_settings_is_open()) sparkles_settings_close();
+                    else if (sparkles_radial_list_is_open()) sparkles_radial_list_close();
+                    else if (sparkles_vis_picker_is_open()) sparkles_vis_picker_close();
+                    else if (sparkles_context_menu_is_open()) sparkles_context_menu_close();
+                    else if (sparkles_queue_is_open()) sparkles_queue_toggle();
+                    else if (sparkles_krystal_is_open()) sparkles_krystal_toggle();
+                    else if (sparkles_eq_is_open()) sparkles_eq_toggle();
+                    else if (s_view_mode != SPARKLES_VIEW_PLAYER) s_view_mode = SPARKLES_VIEW_PLAYER;
+                    else s_show_quit_modal = true;
+                    break;
+                case SPARKLES_ACTION_PLAY_PAUSE:
+                    if (atomic_load(&play_state_atomic) == STATE_STOPPED && playing_filepath[0] != '\0') {
+                        atomic_store(&current_cmd_atomic, CMD_PLAY);
+                    } else {
+                        atomic_store(&current_cmd_atomic, CMD_PAUSE);
+                    }
+                    break;
+                case SPARKLES_ACTION_NEXT:
+                    atomic_store(&current_cmd_atomic, CMD_NEXT);
+                    break;
+                case SPARKLES_ACTION_PREV:
+                    atomic_store(&current_cmd_atomic, CMD_PREV);
+                    break;
+                case SPARKLES_ACTION_TOGGLE_RADIAL:
+                    sparkles_radial_list_toggle();
+                    break;
+                case SPARKLES_ACTION_TOGGLE_SETTINGS:
+                    sparkles_settings_toggle();
+                    break;
+                case SPARKLES_ACTION_TOGGLE_VIEW:
+                    s_view_mode = (s_view_mode == SPARKLES_VIEW_PLAYER) ? SPARKLES_VIEW_GRID : SPARKLES_VIEW_PLAYER;
+                    break;
+                case SPARKLES_ACTION_TOGGLE_QUEUE:
+                    sparkles_queue_toggle();
+                    break;
+                case SPARKLES_ACTION_TOGGLE_EQ:
+                    if (sparkles_krystal_is_open()) sparkles_krystal_toggle();
+                    sparkles_eq_toggle();
+                    break;
+                case SPARKLES_ACTION_TOGGLE_KRYSTAL:
+                    if (sparkles_eq_is_open()) sparkles_eq_toggle();
+                    sparkles_krystal_toggle();
+                    break;
+                case SPARKLES_ACTION_TOGGLE_HELP:
+                    sparkles_player_view_toggle_help();
+                    break;
+                case SPARKLES_ACTION_NAV_LEFT:
+                case SPARKLES_ACTION_NAV_RIGHT:
+                    s_view_mode = (s_view_mode == SPARKLES_VIEW_PLAYER) ? SPARKLES_VIEW_GRID : SPARKLES_VIEW_PLAYER;
+                    break;
+                case SPARKLES_ACTION_NAV_UP:
+                    if (!sparkles_eq_is_open() && !sparkles_krystal_is_open()) sparkles_eq_toggle();
+                    else if (sparkles_eq_is_open()) { sparkles_eq_toggle(); sparkles_krystal_toggle(); }
+                    break;
+                case SPARKLES_ACTION_NAV_DOWN:
+                    if (sparkles_krystal_is_open()) sparkles_krystal_toggle();
+                    else if (sparkles_eq_is_open()) sparkles_eq_toggle();
+                    break;
+                case SPARKLES_ACTION_CYCLE_VIS:
+                    sparkles_vis_cycle();
+                    break;
+                case SPARKLES_ACTION_PICK_VIS:
+                    sparkles_vis_picker_toggle();
+                    break;
+                case SPARKLES_ACTION_LOCATE_PLAYING:
+                    tile_song_list_locate_playing();
+                    break;
+                case SPARKLES_ACTION_TOGGLE_LYRICS:
+                    if (!app_config.online_lyrics_asked) {
+                        s_show_lyrics_modal = true;
+                        s_lyrics_modal_step = 0;
+                    } else if (app_config.online_lyrics && !app_config.download_online_lyrics_asked) {
+                        s_show_lyrics_modal = true;
+                        s_lyrics_modal_step = 1;
+                    } else {
+                        sparkles_player_view_toggle_lyrics();
+                    }
+                    break;
+                case SPARKLES_ACTION_TOGGLE_SEARCH:
+                    if (s_view_mode == SPARKLES_VIEW_PLAYER) sparkles_radial_list_open();
+                    else tile_song_list_open_search();
+                    break;
+                default:
+                    break;
+            }
+        }
 
-        bool show_profile_prompt = !app_config.listening_profile_asked;
-        if (show_profile_prompt) {
+        // Quit confirmation input
+        if (s_show_quit_modal) {
             bool answered_yes = IsKeyPressed(KEY_Y) || IsKeyPressed(KEY_ENTER);
-            bool answered_no  = IsKeyPressed(KEY_N) || IsKeyPressed(KEY_ESCAPE);
+            bool answered_no  = IsKeyPressed(KEY_N);
 
-            float qw = 520.0f;
-            float qh = 210.0f;
+            float qw = 420.0f;
+            float qh = 160.0f;
             Rectangle q_box = { (sw - qw) * 0.5f, (sh - qh) * 0.5f, qw, qh };
             Rectangle btn_yes = { q_box.x + q_box.width - 170, q_box.y + q_box.height - 42, 68, 26 };
             Rectangle btn_no  = { q_box.x + q_box.width - 92,  q_box.y + q_box.height - 42, 68, 26 };
@@ -107,185 +205,17 @@ int main(int argc, char **argv) {
             }
 
             if (answered_yes) {
-                app_config.enable_listening_profile = true;
-                app_config.listening_profile_asked = true;
-                config_save();
-            } else if (answered_no) {
-                app_config.enable_listening_profile = false;
-                app_config.listening_profile_asked = true;
-                config_save();
-            }
-        }
-
-        // If lyrics modal is active, intercept inputs
-        if (s_show_lyrics_modal) {
-            bool answered_yes = IsKeyPressed(KEY_Y) || IsKeyPressed(KEY_ENTER);
-            bool answered_no  = IsKeyPressed(KEY_N) || IsKeyPressed(KEY_ESCAPE);
-
-            if (answered_yes) {
-                if (s_lyrics_modal_step == 0) {
-                    app_config.online_lyrics = true;
-                    app_config.online_lyrics_asked = true;
-                    config_save();
-                    s_lyrics_modal_step = 1;
-                } else {
-                    app_config.download_online_lyrics = true;
-                    app_config.download_online_lyrics_asked = true;
-                    config_save();
-                    s_show_lyrics_modal = false;
-                    // Trigger immediate fetch with approved settings
-                    pthread_mutex_lock(&state_mutex);
-                    lyrics_engine_fetch_async(p_metadata.title, p_metadata.artist, p_metadata.album,
-                                              atomic_load(&p_total_sec), playing_filepath, p_metadata.lyrics,
-                                              atomic_load(&current_track_id));
-                    pthread_mutex_unlock(&state_mutex);
-                }
-            } else if (answered_no) {
-                if (s_lyrics_modal_step == 0) {
-                    app_config.online_lyrics = false;
-                    app_config.online_lyrics_asked = true;
-                    config_save();
-                    s_show_lyrics_modal = false;
-                } else {
-                    app_config.download_online_lyrics = false;
-                    app_config.download_online_lyrics_asked = true;
-                    config_save();
-                    s_show_lyrics_modal = false;
-                }
-            }
-        }
-
-        /* ESC Priority, close radial list -> close vis picker
-           -> close tile search -> close context menu -> close queue
-           -> close EQ -> close Krystal -> close window */
-        if (!s_show_lyrics_modal && IsKeyPressed(KEY_ESCAPE)) {
-            if (sparkles_settings_is_open()) {
-                sparkles_settings_close();
-            } else if (sparkles_radial_list_is_open()) {
-                sparkles_radial_list_close();
-            } else if (sparkles_vis_picker_is_open()) {
-                sparkles_vis_picker_close();
-            } else if (is_searching) {
-                tile_song_list_close_search();
-                tile_playlists_close_search();
-            } else if (sparkles_context_menu_is_open()) {
-                sparkles_context_menu_close();
-            } else if (sparkles_queue_is_open()) {
-                sparkles_queue_toggle();
-            } else if (sparkles_eq_is_open()) {
-                sparkles_eq_toggle();
-            } else if (sparkles_krystal_is_open()) {
-                sparkles_krystal_toggle();
-            } else {
                 break;
-            }
-        }
-
-        // Global shortcuts (only processed when not typing in search)
-        if (!is_searching) {
-            // Comma toggles the settings menu
-            if (IsKeyPressed(KEY_COMMA)) {
-                sparkles_settings_toggle();
-            }
-            // Tab toggles the half-radial song list
-            if (IsKeyPressed(KEY_TAB)) {
-                sparkles_radial_list_toggle();
-            }
-            // 'T' toggles between fullscreen player view and grid
-            if (IsKeyPressed(KEY_T)) {
-                s_view_mode = (s_view_mode == SPARKLES_VIEW_PLAYER) ? SPARKLES_VIEW_GRID : SPARKLES_VIEW_PLAYER;
-            }
-            if (IsKeyPressed(KEY_Q)) {
-                sparkles_queue_toggle();
-            }
-            if (IsKeyPressed(KEY_E)) {
-                if (sparkles_krystal_is_open()) sparkles_krystal_toggle();
-                sparkles_eq_toggle(); // Toggle Equalizer screen
-            }
-            if (IsKeyPressed(KEY_K)) {
-                if (sparkles_eq_is_open()) sparkles_eq_toggle();
-                sparkles_krystal_toggle(); // Toggle Krystal DSP screen
-            }
-            if (IsKeyPressed(KEY_H)) {
-                sparkles_player_view_toggle_help();
-            }
-            if (!sparkles_eq_is_open() && !sparkles_krystal_is_open() && !sparkles_queue_is_open() && !sparkles_context_menu_is_open() && !sparkles_vis_picker_is_open()) {
-                // Trigger search on US ANSI '/', Spanish/Latin-American ISO Shift+7, or Ctrl+F
-                bool trigger_search = IsKeyPressed(KEY_SLASH) ||
-                                      ((IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) && IsKeyPressed(KEY_SEVEN)) ||
-                                      ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) && IsKeyPressed(KEY_F));
-
-                int typed_c = GetCharPressed();
-                while (typed_c > 0) {
-                    if (typed_c == '/') {
-                        trigger_search = true;
-                    }
-                    typed_c = GetCharPressed();
-                }
-
-                if (trigger_search) {
-                    while (GetCharPressed() > 0); // Drain any remaining '/' chars
-                    if (s_view_mode == SPARKLES_VIEW_PLAYER) {
-                        sparkles_radial_list_open();
-                    } else {
-                        Vector2 m = GetMousePosition();
-                        SparklesTile *pl_tile = NULL;
-                        for (int i = 0; i < grid.tile_count; i++) {
-                            if (grid.tiles[i].type == TILE_TRACK_LIST) {
-                                pl_tile = &grid.tiles[i];
-                                break;
-                            }
-                        }
-
-                        if (pl_tile && CheckCollisionPointRec(m, pl_tile->rect)) {
-                            tile_playlists_open_search();
-                        } else {
-                            tile_song_list_open_search();
-                        }
-                    }
-                }
-
-                if (IsKeyPressed(KEY_SPACE)) {
-                    if (atomic_load(&play_state_atomic) == STATE_STOPPED && playing_filepath[0] != '\0') {
-                        atomic_store(&current_cmd_atomic, CMD_PLAY);
-                    } else {
-                        atomic_store(&current_cmd_atomic, CMD_PAUSE);
-                    }
-                }
-                if (IsKeyPressed(KEY_N)) atomic_store(&current_cmd_atomic, CMD_NEXT);
-                if (IsKeyPressed(KEY_B)) atomic_store(&current_cmd_atomic, CMD_PREV);
-                if (IsKeyPressed(KEY_C)) {
-                    if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) {
-                        sparkles_vis_picker_toggle();
-                    } else {
-                        sparkles_vis_cycle();
-                    }
-                }
-
-                // Shift+L, Locate and scroll directly to the playing song in the song list
-                if (IsKeyPressed(KEY_L) && (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT))) {
-                    tile_song_list_locate_playing();
-                }
-                // Lowercase 'l', Toggle Lyrics or ask permissions if unanswered in config.ini
-                else if (IsKeyPressed(KEY_L)) {
-                    if (!app_config.online_lyrics_asked) {
-                        s_show_lyrics_modal = true;
-                        s_lyrics_modal_step = 0;
-                    } else if (app_config.online_lyrics && !app_config.download_online_lyrics_asked) {
-                        s_show_lyrics_modal = true;
-                        s_lyrics_modal_step = 1;
-                    } else {
-                        sparkles_player_view_toggle_lyrics();
-                    }
-                }
+            } else if (answered_no) {
+                s_show_quit_modal = false;
             }
         }
 
         // Process modals and popups first
         bool modal_active = !app_config.listening_profile_asked || s_show_lyrics_modal ||
-                            sparkles_context_menu_is_open() || sparkles_queue_is_open() ||
-                            sparkles_radial_list_is_open() || sparkles_vis_picker_is_open() ||
-                            sparkles_settings_is_open();
+                            s_show_quit_modal || sparkles_context_menu_is_open() ||
+                            sparkles_queue_is_open() || sparkles_radial_list_is_open() ||
+                            sparkles_vis_picker_is_open() || sparkles_settings_is_open();
 
         if (sparkles_settings_is_open()) {
             sparkles_settings_handle_input(sw, sh);
@@ -522,6 +452,38 @@ int main(int argc, char **argv) {
             }
         }
 
+        // Quit confirmation modal
+        if (s_show_quit_modal) {
+            DrawRectangle(0, 0, (int)sw, (int)sh, ColorAlpha(BLACK, 0.78f));
+
+            float qw = 420.0f;
+            float qh = 160.0f;
+            Rectangle q_box = { (sw - qw) * 0.5f, (sh - qh) * 0.5f, qw, qh };
+
+            DrawRectangleRec(q_box, (Color){ 8, 8, 11, 255 });
+            DrawRectangleLinesEx(q_box, 1.0f, COLOR_ACCENT);
+            DrawNothingCornerBrackets(q_box, 8.0f, COLOR_ACCENT);
+
+            DrawText("QUIT", (int)q_box.x + 20, (int)q_box.y + 16, 10, COLOR_TEXT_MUTED);
+            DrawText("Quit Koni?", (int)q_box.x + 20, (int)q_box.y + 34, FONT_SIZE_MD, COLOR_TEXT_PRIMARY);
+            DrawText("Are you sure you want to exit the player?", (int)q_box.x + 20, (int)q_box.y + 64, FONT_SIZE_SM, COLOR_TEXT_MUTED);
+
+            Vector2 m = GetMousePosition();
+            Rectangle btn_yes = { q_box.x + q_box.width - 170, q_box.y + q_box.height - 42, 68, 26 };
+            Rectangle btn_no  = { q_box.x + q_box.width - 92,  q_box.y + q_box.height - 42, 68, 26 };
+
+            bool hover_yes = CheckCollisionPointRec(m, btn_yes);
+            bool hover_no  = CheckCollisionPointRec(m, btn_no);
+
+            DrawRectangleRec(btn_yes, hover_yes ? ColorAlpha(COLOR_ACCENT, 0.25f) : (Color){ 18, 19, 24, 255 });
+            DrawRectangleLinesEx(btn_yes, 1.0f, hover_yes ? COLOR_ACCENT : COLOR_TEXT_MUTED);
+            DrawText("[Y] Yes", (int)btn_yes.x + 12, (int)btn_yes.y + 6, FONT_SIZE_SM, COLOR_TEXT_PRIMARY);
+
+            DrawRectangleRec(btn_no, hover_no ? ColorAlpha(COLOR_ACCENT, 0.25f) : (Color){ 18, 19, 24, 255 });
+            DrawRectangleLinesEx(btn_no, 1.0f, hover_no ? COLOR_ACCENT : COLOR_TEXT_MUTED);
+            DrawText("[N] No", (int)btn_no.x + 14, (int)btn_no.y + 6, FONT_SIZE_SM, COLOR_TEXT_PRIMARY);
+        }
+
         EndDrawing();
     }
 
@@ -534,6 +496,7 @@ int main(int argc, char **argv) {
     save_state();
     config_save();
     listening_profile_shutdown();
+    sparkles_input_shutdown();
     db_shutdown();
     curl_global_cleanup();
     sparkles_font_unload();
