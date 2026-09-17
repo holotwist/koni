@@ -7,6 +7,7 @@
 #include "db.h"
 #include "state.h"
 #include "listening_profile.h"
+#include "sparkles_text_prompt.h"
 #include "rlgl.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,37 +24,42 @@ static bool s_open = false;
 static float s_anim = 0.0f;
 static SettingsTab s_active_tab = SETTINGS_TAB_LIBRARY;
 
-// Directory addition input state
-static bool s_adding_path = false;
-static char s_path_buf[1024] = {0};
-static int s_path_len = 0;
-
 // Rebuild and profile reset confirmation states
 static bool s_rebuild_confirm = false;
 static float s_rebuild_confirm_timer = 0.0f;
 static bool s_profile_confirm = false;
 static float s_profile_confirm_timer = 0.0f;
 
+static void on_add_folder_submitted(const char *path, void *ud) {
+    (void)ud;
+    if (!path || !path[0]) return;
+    char expanded[1024];
+    if (path[0] == '~' && path[1] == '/') {
+        const char *home = getenv("HOME");
+        snprintf(expanded, sizeof(expanded), "%s/%s", home ? home : "", path + 2);
+    } else {
+        strncpy(expanded, path, sizeof(expanded) - 1);
+        expanded[sizeof(expanded) - 1] = '\0';
+    }
+    config_add_music_dir(expanded);
+    library_scanner_start();
+}
+
 void sparkles_settings_init(void) {
     s_open = false;
     s_anim = 0.0f;
     s_active_tab = SETTINGS_TAB_LIBRARY;
-    s_adding_path = false;
-    s_path_buf[0] = '\0';
-    s_path_len = 0;
     s_rebuild_confirm = false;
     s_rebuild_confirm_timer = 0.0f;
 }
 
 void sparkles_settings_open(void) {
     s_open = true;
-    s_adding_path = false;
     s_rebuild_confirm = false;
 }
 
 void sparkles_settings_close(void) {
     s_open = false;
-    s_adding_path = false;
     s_rebuild_confirm = false;
 }
 
@@ -128,44 +134,6 @@ static bool DrawToggle(Rectangle bounds, const char *label, bool *val) {
 
 bool sparkles_settings_handle_input(float screen_w, float screen_h) {
     if (!s_open || s_anim < 0.95f) return false;
-
-    // Direct path text input
-    if (s_adding_path) {
-        int c = GetCharPressed();
-        while (c > 0) {
-            if (c >= 32 && c <= 126 && s_path_len < (int)sizeof(s_path_buf) - 1) {
-                s_path_buf[s_path_len++] = (char)c;
-                s_path_buf[s_path_len] = '\0';
-            }
-            c = GetCharPressed();
-        }
-
-        if (IsKeyPressed(KEY_BACKSPACE) && s_path_len > 0) {
-            s_path_buf[--s_path_len] = '\0';
-        }
-
-        if (IsKeyPressed(KEY_ESCAPE)) {
-            s_adding_path = false;
-            return true;
-        }
-
-        if (IsKeyPressed(KEY_ENTER) && s_path_len > 0) {
-            char expanded_path[1024];
-            if (s_path_buf[0] == '~' && s_path_buf[1] == '/') {
-                const char *home = getenv("HOME");
-                snprintf(expanded_path, sizeof(expanded_path), "%s/%s", home ? home : "", s_path_buf + 2);
-            } else {
-                strncpy(expanded_path, s_path_buf, sizeof(expanded_path) - 1);
-                expanded_path[sizeof(expanded_path) - 1] = '\0';
-            }
-
-            config_add_music_dir(expanded_path);
-            library_scanner_start();
-            s_adding_path = false;
-            return true;
-        }
-        return true;
-    }
 
     if (IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_COMMA)) {
         sparkles_settings_close();
@@ -253,7 +221,6 @@ void sparkles_settings_render(float screen_w, float screen_h) {
 
         if (interactive && hover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             s_active_tab = (SettingsTab)t;
-            s_adding_path = false;
         }
     }
 
@@ -287,23 +254,16 @@ void sparkles_settings_render(float screen_w, float screen_h) {
                 cy += 30.0f;
             }
 
-            // Path prompt or add button
-            if (s_adding_path) {
-                Rectangle input_rect = { main_rect.x + 18, cy, row_w, 28.0f };
-                DrawRectangleRec(input_rect, (Color){ 14, 15, 20, 255 });
-                DrawRectangleLinesEx(input_rect, 1.0f, COLOR_ACCENT);
-
-                const char *cur = ((int)(GetTime() * 2.5f) % 2 == 0) ? "_" : " ";
-                DrawText(TextFormat("%s%s", s_path_buf, cur), (int)input_rect.x + 8, (int)input_rect.y + 6, FONT_SIZE_SM, COLOR_TEXT_PRIMARY);
-                int hint_w = MeasureText("[Enter: Add | Esc: Cancel]", FONT_SIZE_XS);
-                DrawText("[Enter: Add | Esc: Cancel]", (int)(input_rect.x + input_rect.width - hint_w - 10), (int)input_rect.y + 6, FONT_SIZE_XS, COLOR_TEXT_MUTED);
-            } else {
-                Rectangle add_btn = { main_rect.x + 18, cy, 140.0f, 26.0f };
-                if (interactive && DrawBtn(add_btn, "+ Add Folder", false)) {
-                    s_adding_path = true;
-                    s_path_buf[0] = '\0';
-                    s_path_len = 0;
-                }
+            Rectangle add_btn = { main_rect.x + 18, cy, 140.0f, 26.0f };
+            if (interactive && DrawBtn(add_btn, "+ Add Folder", false)) {
+                sparkles_text_prompt_open(&(SparklesTextPromptConfig){
+                    .tag = "MUSIC FOLDER",
+                    .prompt = "Enter Directory Path",
+                    .submit_label = "Add",
+                    .initial_text = "~/Music",
+                    .max_len = 512,
+                    .on_submit = on_add_folder_submitted
+                });
             }
 
             cy += 48.0f;

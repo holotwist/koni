@@ -5,6 +5,7 @@
 #include "rlgl.h"
 #include "krystal_profiles.h"
 #include "krystal_preset_manager.h"
+#include "modals/sparkles_text_prompt.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,11 +28,6 @@ static KrystalUiTab s_active_tab = KRYSTAL_TAB_SPATIAL;
 // Presets sidebar scroll
 static int s_preset_scroll = 0;
 
-// Save Preset Dialog
-static bool s_saving_preset = false;
-static char s_save_name[64] = {0};
-static int s_save_len = 0;
-
 // Radar and spatial scene interaction
 static bool s_dragging_source_xy = false;
 static bool s_dragging_elevation = false;
@@ -39,11 +35,19 @@ static bool s_dragging_elev_arc = false;
 static float s_elev_drag_start_y = 0.0f;
 static float s_elev_drag_start_val = 0.0f;
 
+static void on_krystal_preset_save_submit(const char *name, void *ud) {
+    (void)ud;
+    if (!name || !name[0]) return;
+    KrystalConfig cfg;
+    krystal_get_config(&cfg);
+    krystal_presets_save(name, &cfg);
+    krystal_set_active_preset_name(name);
+}
+
 void sparkles_krystal_init(void) {
     s_krystal_open = false;
     s_anim_progress = 0.0f;
     s_active_tab = KRYSTAL_TAB_SPATIAL;
-    s_saving_preset = false;
     s_dragging_source_xy = false;
     s_dragging_elevation = false;
     s_dragging_elev_arc = false;
@@ -52,7 +56,6 @@ void sparkles_krystal_init(void) {
 void sparkles_krystal_toggle(void) {
     s_krystal_open = !s_krystal_open;
     if (!s_krystal_open) {
-        s_saving_preset = false;
         s_dragging_source_xy = false;
         s_dragging_elevation = false;
         s_dragging_elev_arc = false;
@@ -189,7 +192,7 @@ void sparkles_krystal_render(float screen_w, float screen_h) {
     Rectangle b = { 0.0f, 0.0f, screen_w, screen_h };
     Vector2 mouse = GetMousePosition();
 
-    bool interactive = (s_anim_progress >= 0.99f) && !s_saving_preset;
+    bool interactive = (s_anim_progress >= 0.99f);
 
     // Semi-transparent background
     DrawRectangleRec(b, ColorAlpha((Color){ 3, 3, 5, 255 }, 0.70f * ease));
@@ -199,68 +202,6 @@ void sparkles_krystal_render(float screen_w, float screen_h) {
 
     KrystalTelemetry telem;
     krystal_get_telemetry(&telem);
-
-    // Save preset dialog
-    if (s_saving_preset) {
-        int c = GetCharPressed();
-        while (c > 0) {
-            if (c >= 32 && c <= 126 && s_save_len < (int)sizeof(s_save_name) - 1) {
-                s_save_name[s_save_len++] = (char)c;
-                s_save_name[s_save_len] = '\0';
-            }
-            c = GetCharPressed();
-        }
-        if (IsKeyPressed(KEY_BACKSPACE) && s_save_len > 0) s_save_name[--s_save_len] = '\0';
-
-        bool do_save = (IsKeyPressed(KEY_ENTER) && s_save_len > 0);
-        bool do_cancel = IsKeyPressed(KEY_ESCAPE);
-
-        DrawRectangle(0, 0, (int)screen_w, (int)screen_h, ColorAlpha(BLACK, 0.78f));
-        float qw = 460.0f;
-        float qh = 170.0f;
-        Rectangle save_box = { (screen_w - qw) * 0.5f, (screen_h - qh) * 0.5f, qw, qh };
-
-        DrawRectangleRec(save_box, (Color){ 8, 8, 11, 255 });
-        DrawRectangleLinesEx(save_box, 1.0f, COLOR_ACCENT);
-        DrawNothingCornerBrackets(save_box, 8.0f, COLOR_ACCENT);
-
-        DrawText("// KRYSTAL PRESET", (int)save_box.x + 20, (int)save_box.y + 16, 10, COLOR_TEXT_MUTED);
-        DrawText("Save Krystal Preset As", (int)save_box.x + 20, (int)save_box.y + 34, FONT_SIZE_MD, COLOR_TEXT_PRIMARY);
-
-        Rectangle input_box = { save_box.x + 20, save_box.y + 64, save_box.width - 40, 32 };
-        DrawRectangleRec(input_box, (Color){ 14, 15, 18, 255 });
-        DrawRectangleLinesEx(input_box, 1.0f, (Color){ 35, 38, 46, 255 });
-        const char *cur = ((int)(GetTime() * 2.5f) % 2 == 0) ? "_" : " ";
-        DrawText(TextFormat("%s%s", s_save_name, cur), (int)input_box.x + 10, (int)input_box.y + 8, FONT_SIZE_MD, COLOR_TEXT_PRIMARY);
-
-        Rectangle btn_save   = { save_box.x + save_box.width - 180, save_box.y + save_box.height - 42, 80, 26 };
-        Rectangle btn_cancel = { save_box.x + save_box.width - 92,  save_box.y + save_box.height - 42, 72, 26 };
-
-        bool hover_save = CheckCollisionPointRec(mouse, btn_save);
-        bool hover_cancel = CheckCollisionPointRec(mouse, btn_cancel);
-
-        if (hover_save && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && s_save_len > 0) do_save = true;
-        if (hover_cancel && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) do_cancel = true;
-
-        DrawRectangleRec(btn_save, (hover_save && s_save_len > 0) ? ColorAlpha(COLOR_ACCENT, 0.25f) : (Color){ 18, 19, 24, 255 });
-        DrawRectangleLinesEx(btn_save, 1.0f, (hover_save && s_save_len > 0) ? COLOR_ACCENT : (s_save_len > 0 ? COLOR_TEXT_PRIMARY : COLOR_TEXT_DARK));
-        DrawText("Save", (int)btn_save.x + (btn_save.width - MeasureText("Save", FONT_SIZE_SM)) / 2, (int)btn_save.y + 6, FONT_SIZE_SM, s_save_len > 0 ? COLOR_TEXT_PRIMARY : COLOR_TEXT_DARK);
-
-        DrawRectangleRec(btn_cancel, hover_cancel ? ColorAlpha(COLOR_ACCENT, 0.25f) : (Color){ 18, 19, 24, 255 });
-        DrawRectangleLinesEx(btn_cancel, 1.0f, hover_cancel ? COLOR_ACCENT : COLOR_TEXT_MUTED);
-        DrawText("Cancel", (int)btn_cancel.x + (btn_cancel.width - MeasureText("Cancel", FONT_SIZE_SM)) / 2, (int)btn_cancel.y + 6, FONT_SIZE_SM, COLOR_TEXT_PRIMARY);
-
-        if (do_cancel) {
-            s_saving_preset = false;
-        } else if (do_save) {
-            krystal_presets_save(s_save_name, &cfg);
-            krystal_set_active_preset_name(s_save_name);
-            s_saving_preset = false;
-        }
-
-        rlPopMatrix();
-        return;
-    }
 
     // Top toolbar
     float top_bar_h = 44.0f;
@@ -303,9 +244,13 @@ void sparkles_krystal_render(float screen_w, float screen_h) {
     DrawText("ACOUSTIC PROFILES", (int)side_rect.x + 16, (int)side_rect.y + 14, 11, COLOR_TEXT_MUTED);
 
     if (interactive && DrawBtn((Rectangle){ side_rect.x + side_rect.width - 68, side_rect.y + 8, 56, 22 }, "+ Save", false)) {
-        s_saving_preset = true;
-        s_save_name[0] = '\0';
-        s_save_len = 0;
+        sparkles_text_prompt_open(&(SparklesTextPromptConfig){
+            .tag = "KRYSTAL PRESET",
+            .prompt = "Save Krystal Preset As",
+            .submit_label = "Save",
+            .max_len = 48,
+            .on_submit = on_krystal_preset_save_submit
+        });
     }
 
     float list_y = side_rect.y + 38;

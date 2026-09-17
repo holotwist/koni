@@ -2,8 +2,10 @@
 #include "sparkles_widgets.h"
 #include "state.h"
 #include "modals/sparkles_context_menu.h"
+#include "input/sparkles_input.h"
 #include <string.h>
 #include <strings.h>
+#include <math.h>
 
 static int s_song_scroll = 0;
 static int s_saved_scroll = 0;
@@ -363,84 +365,82 @@ void tile_song_list_input(SparklesTile *tile, Rectangle b) {
         }
     }
 
-    // Mouse wheel scrolling
-    if (CheckCollisionPointRec(m, b)) {
-        float wheel = GetMouseWheelMove();
-        if (wheel != 0.0f) {
-            s_song_scroll -= (int)wheel * 3;
-            if (s_song_scroll < 0) s_song_scroll = 0;
-        }
+    // Drag & wheel scroll
+    float scroll = sparkles_input_get_scroll_delta(b);
+    if (scroll != 0.0f) {
+        s_song_scroll += (int)roundf(scroll);
+        if (s_song_scroll < 0) s_song_scroll = 0;
     }
 
-    // Right-Click context menu on songs
-    if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && CheckCollisionPointRec(m, b)) {
-        if (m.y < b.y + 70.0f) return;
-        int clicked = s_song_scroll + (int)(m.y - (b.y + 70.0f)) / 32;
-        pthread_mutex_lock(&state_mutex);
-        int match_count = 0;
-        for (int t = 0; t < num_library_tracks; t++) {
-            if (!s_search_active || s_search_len == 0 ||
-                str_contains_ci(library_tracks[t].title, s_search_buf) ||
-                str_contains_ci(library_tracks[t].artist, s_search_buf) ||
-                str_contains_ci(library_tracks[t].name, s_search_buf)) {
-                if (match_count == clicked) {
-                    SparklesTrackItem item = {0};
-                    strncpy(item.path, library_tracks[t].path, sizeof(item.path) - 1);
-                    strncpy(item.title, library_tracks[t].title[0] ? library_tracks[t].title : library_tracks[t].name, sizeof(item.title) - 1);
-                    strncpy(item.artist, library_tracks[t].artist, sizeof(item.artist) - 1);
-                    strncpy(item.album, library_tracks[t].album, sizeof(item.album) - 1);
-                    item.duration_sec = library_tracks[t].duration_sec;
-                    pthread_mutex_unlock(&state_mutex);
-                    sparkles_context_menu_open(m, &item);
-                    return;
+    // Long-press or right-click context menu
+    Vector2 lp;
+    if (sparkles_input_consume_long_press(b, &lp)) {
+        if (lp.y >= b.y + 70.0f) {
+            int clicked = s_song_scroll + (int)(lp.y - (b.y + 70.0f)) / 32;
+            pthread_mutex_lock(&state_mutex);
+            int match_count = 0;
+            for (int t = 0; t < num_library_tracks; t++) {
+                if (!s_search_active || s_search_len == 0 ||
+                    str_contains_ci(library_tracks[t].title, s_search_buf) ||
+                    str_contains_ci(library_tracks[t].artist, s_search_buf) ||
+                    str_contains_ci(library_tracks[t].name, s_search_buf)) {
+                    if (match_count == clicked) {
+                        SparklesTrackItem item = {0};
+                        strncpy(item.path, library_tracks[t].path, sizeof(item.path) - 1);
+                        strncpy(item.title, library_tracks[t].title[0] ? library_tracks[t].title : library_tracks[t].name, sizeof(item.title) - 1);
+                        strncpy(item.artist, library_tracks[t].artist, sizeof(item.artist) - 1);
+                        strncpy(item.album, library_tracks[t].album, sizeof(item.album) - 1);
+                        item.duration_sec = library_tracks[t].duration_sec;
+                        pthread_mutex_unlock(&state_mutex);
+                        sparkles_context_menu_open(lp, &item);
+                        return;
+                    }
+                    match_count++;
                 }
-                match_count++;
             }
+            pthread_mutex_unlock(&state_mutex);
+            return;
         }
-        pthread_mutex_unlock(&state_mutex);
-        return;
     }
 
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, b)) {
-        // Click search button
+    // Tap or left-click
+    Vector2 tap;
+    if (sparkles_input_consume_tap(b, &tap)) {
         int search_btn_w = MeasureText("[Search]", FONT_SIZE_SM);
-        if (!s_search_active && CheckCollisionPointRec(m, (Rectangle){ b.x + b.width - search_btn_w - 24, b.y + 12, search_btn_w + 12, 26 })) {
+        if (!s_search_active && CheckCollisionPointRec(tap, (Rectangle){ b.x + b.width - search_btn_w - 24, b.y + 12, search_btn_w + 12, 26 })) {
             s_search_active = true;
             return;
         }
-        // Click close search
-        if (s_search_active && CheckCollisionPointRec(m, (Rectangle){ b.x + b.width - 38, b.y + 12, 28, 25 })) {
+        if (s_search_active && CheckCollisionPointRec(tap, (Rectangle){ b.x + b.width - 38, b.y + 12, 28, 25 })) {
             tile_song_list_close_search();
             return;
         }
 
-        // Click track to select cursor and play
-        if (m.y < b.y + 70.0f) return;
-        int clicked = s_song_scroll + (int)(m.y - (b.y + 70.0f)) / 32;
-        pthread_mutex_lock(&state_mutex);
+        if (tap.y >= b.y + 70.0f) {
+            int clicked = s_song_scroll + (int)(tap.y - (b.y + 70.0f)) / 32;
+            pthread_mutex_lock(&state_mutex);
+            int match_count = 0;
+            for (int t = 0; t < num_library_tracks; t++) {
+                if (!s_search_active || s_search_len == 0 ||
+                    str_contains_ci(library_tracks[t].title, s_search_buf) ||
+                    str_contains_ci(library_tracks[t].artist, s_search_buf) ||
+                    str_contains_ci(library_tracks[t].name, s_search_buf)) {
+                    if (match_count == clicked) {
+                        selected_library_idx = t;
+                        strncpy(playing_filepath, library_tracks[t].path, sizeof(playing_filepath) - 1);
+                        strncpy(playing_filename, library_tracks[t].name, 255);
+                        playing_file_idx = t;
+                        current_play_source = SOURCE_LIBRARY;
+                        pthread_mutex_unlock(&state_mutex);
 
-        // Count visible filtered tracks
-        int match_count = 0;
-        for (int t = 0; t < num_library_tracks; t++) {
-            if (!s_search_active || s_search_len == 0 ||
-                str_contains_ci(library_tracks[t].title, s_search_buf) ||
-                str_contains_ci(library_tracks[t].artist, s_search_buf) ||
-                str_contains_ci(library_tracks[t].name, s_search_buf)) {
-                if (match_count == clicked) {
-                    selected_library_idx = t; // Set cursor position
-                    strncpy(playing_filepath, library_tracks[t].path, sizeof(playing_filepath) - 1);
-                    strncpy(playing_filename, library_tracks[t].name, 255);
-                    playing_file_idx = t;
-                    current_play_source = SOURCE_LIBRARY;
-                    pthread_mutex_unlock(&state_mutex);
-
-                    atomic_store(&seek_target_ms, -1);
-                    atomic_store(&current_cmd_atomic, CMD_PLAY);
-                    return;
+                        atomic_store(&seek_target_ms, -1);
+                        atomic_store(&current_cmd_atomic, CMD_PLAY);
+                        return;
+                    }
+                    match_count++;
                 }
-                match_count++;
             }
+            pthread_mutex_unlock(&state_mutex);
         }
-        pthread_mutex_unlock(&state_mutex);
     }
 }

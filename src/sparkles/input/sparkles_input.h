@@ -84,6 +84,17 @@ void sparkles_input_update(float dt);
 void sparkles_input_set_driver(const SparklesInputDriver *driver);
 const SparklesPointer* sparkles_input_get_pointer(void);
 
+// Immediate-mode gesture queries
+bool sparkles_input_consume_tap(Rectangle bounds, Vector2 *out_pos);
+bool sparkles_input_consume_long_press(Rectangle bounds, Vector2 *out_pos);
+float sparkles_input_get_scroll_delta(Rectangle bounds);
+
+// Driver emission helpers
+void sparkles_input_emit_tap(Vector2 pos);
+void sparkles_input_emit_long_press(Vector2 pos);
+void sparkles_input_add_scroll(Vector2 pos, float delta);
+void sparkles_input_set_fling(float velocity_y);
+
 bool sparkles_input_poll_gesture(SparklesGesture *out_gesture);
 bool sparkles_input_poll_action(SparklesActionType *out_action);
 

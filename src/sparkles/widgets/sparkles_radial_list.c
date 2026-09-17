@@ -4,6 +4,7 @@
 #include "sparkles_theme.h"
 #include "state.h"
 #include "modals/sparkles_context_menu.h"
+#include "input/sparkles_input.h"
 #include <math.h>
 #include <string.h>
 #include <strings.h>
@@ -153,10 +154,12 @@ bool sparkles_radial_list_handle_input(float screen_w, float screen_h) {
     float cx, cy, R, alpha_max, W_arc;
     get_arc_geometry(screen_w, screen_h, &cx, &cy, &R, &alpha_max, &W_arc);
 
-    // Mouse wheel scrolling
-    float wheel = GetMouseWheelMove();
-    if (wheel != 0.0f) {
-        s_target_scroll -= wheel * 3.0f;
+    Rectangle full_screen = { 0.0f, 0.0f, screen_w, screen_h };
+
+    // Wheel & drag scroll
+    float scroll = sparkles_input_get_scroll_delta(full_screen);
+    if (scroll != 0.0f) {
+        s_target_scroll += scroll;
         if (s_target_scroll < 0.0f) s_target_scroll = 0.0f;
         if (s_target_scroll > (float)(s_filtered_count - 1)) {
             s_target_scroll = (s_filtered_count > 0) ? (float)(s_filtered_count - 1) : 0.0f;
@@ -216,8 +219,9 @@ bool sparkles_radial_list_handle_input(float screen_w, float screen_h) {
         return true;
     }
 
-    // Right-click opens context menu on hovered track
-    if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && s_hovered_filtered_idx >= 0 && s_hovered_filtered_idx < s_filtered_count) {
+    // Long-press or right-click context menu
+    Vector2 lp;
+    if (sparkles_input_consume_long_press(full_screen, &lp) && s_hovered_filtered_idx >= 0 && s_hovered_filtered_idx < s_filtered_count) {
         int target = s_filtered[s_hovered_filtered_idx];
         pthread_mutex_lock(&state_mutex);
         SparklesTrackItem item = {0};
@@ -227,31 +231,31 @@ bool sparkles_radial_list_handle_input(float screen_w, float screen_h) {
         strncpy(item.album, library_tracks[target].album, sizeof(item.album) - 1);
         item.duration_sec = library_tracks[target].duration_sec;
         pthread_mutex_unlock(&state_mutex);
-        sparkles_context_menu_open(mouse, &item);
+        sparkles_context_menu_open(lp, &item);
         return true;
     }
 
-    // Left-click selects and plays song, then hides radial menu
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && s_hovered_filtered_idx >= 0 && s_hovered_filtered_idx < s_filtered_count) {
-        int target = s_filtered[s_hovered_filtered_idx];
-        pthread_mutex_lock(&state_mutex);
-        selected_library_idx = target;
-        strncpy(playing_filepath, library_tracks[target].path, sizeof(playing_filepath) - 1);
-        strncpy(playing_filename, library_tracks[target].name, 255);
-        playing_file_idx = target;
-        current_play_source = SOURCE_LIBRARY;
-        pthread_mutex_unlock(&state_mutex);
+    // Tap or left-click
+    Vector2 tap;
+    if (sparkles_input_consume_tap((Rectangle){ 0, 0, screen_w, screen_h }, &tap)) {
+        if (s_hovered_filtered_idx >= 0 && s_hovered_filtered_idx < s_filtered_count) {
+            int target = s_filtered[s_hovered_filtered_idx];
+            pthread_mutex_lock(&state_mutex);
+            selected_library_idx = target;
+            strncpy(playing_filepath, library_tracks[target].path, sizeof(playing_filepath) - 1);
+            strncpy(playing_filename, library_tracks[target].name, 255);
+            playing_file_idx = target;
+            current_play_source = SOURCE_LIBRARY;
+            pthread_mutex_unlock(&state_mutex);
 
-        atomic_store(&seek_target_ms, -1);
-        atomic_store(&current_cmd_atomic, CMD_PLAY);
-        sparkles_radial_list_close();
-        return true;
-    }
-
-    // Clicking anywhere to the left of the arc closes it
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && mouse.x < (screen_w - W_arc - 40.0f)) {
-        sparkles_radial_list_close();
-        return true;
+            atomic_store(&seek_target_ms, -1);
+            atomic_store(&current_cmd_atomic, CMD_PLAY);
+            sparkles_radial_list_close();
+            return true;
+        } else if (tap.x < (screen_w - W_arc - 40.0f)) {
+            sparkles_radial_list_close();
+            return true;
+        }
     }
 
     return true;

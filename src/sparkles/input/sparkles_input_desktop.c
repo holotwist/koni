@@ -48,6 +48,7 @@ static void desktop_handle_text_input(void) {
 }
 
 static void desktop_update(float dt) {
+    (void)dt;
     Vector2 m = GetMousePosition();
     float wheel = GetMouseWheelMove();
 
@@ -57,74 +58,27 @@ static void desktop_update(float dt) {
         return;
     }
 
-    // Suppress shortcut keys while searching or typing
+    // Mouse scroll always active
+    if (wheel != 0.0f) {
+        sparkles_input_add_scroll(m, -wheel * 3.0f);
+    }
+
+    // Mouse right-click emits long-press / secondary action
+    if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+        sparkles_input_emit_long_press(m);
+    }
+
+    // Mouse left-click emits tap immediately on press
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        sparkles_input_emit_tap(m);
+    }
+
+    // Suppress only keyboard shortcuts when text or search is active
     if (sparkles_input_is_text_focused()) {
         if (IsKeyPressed(KEY_ESCAPE)) {
             sparkles_input_emit_action(SPARKLES_ACTION_BACK);
         }
         return;
-    }
-
-    // Right-click emits LONG_PRESS
-    if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
-        sparkles_input_emit_gesture((SparklesGesture){
-            .type = SPARKLES_GESTURE_LONG_PRESS,
-            .pos = m,
-            .delta = {0},
-            .velocity = {0}
-        });
-    }
-
-    // Left-click tap & drag detection
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        s_press_pos = m;
-        s_holding = true;
-        s_hold_timer = 0.0f;
-    }
-
-    if (s_holding && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-        s_hold_timer += dt;
-        Vector2 delta = GetMouseDelta();
-        if (delta.x != 0.0f || delta.y != 0.0f) {
-            sparkles_input_emit_gesture((SparklesGesture){
-                .type = SPARKLES_GESTURE_DRAG_MOVE,
-                .pos = m,
-                .delta = delta,
-                .velocity = { delta.x / (dt > 0 ? dt : 0.016f), delta.y / (dt > 0 ? dt : 0.016f) }
-            });
-        }
-    }
-
-    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-        if (s_holding) {
-            float dist = v2_dist(s_press_pos, m);
-            if (dist < 8.0f && s_hold_timer < 0.40f) {
-                sparkles_input_emit_gesture((SparklesGesture){
-                    .type = SPARKLES_GESTURE_TAP,
-                    .pos = m,
-                    .delta = {0},
-                    .velocity = {0}
-                });
-            } else {
-                sparkles_input_emit_gesture((SparklesGesture){
-                    .type = SPARKLES_GESTURE_DRAG_END,
-                    .pos = m,
-                    .delta = {0},
-                    .velocity = {0}
-                });
-            }
-        }
-        s_holding = false;
-    }
-
-    // Wheel drag simulation
-    if (wheel != 0.0f) {
-        sparkles_input_emit_gesture((SparklesGesture){
-            .type = SPARKLES_GESTURE_DRAG_MOVE,
-            .pos = m,
-            .delta = { 0.0f, -wheel * 24.0f },
-            .velocity = { 0.0f, -wheel * 480.0f }
-        });
     }
 
     // Semantic hotkey translations

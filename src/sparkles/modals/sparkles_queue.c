@@ -2,6 +2,7 @@
 #include "sparkles_queue.h"
 #include "sparkles_theme.h"
 #include "state.h"
+#include "input/sparkles_input.h"
 #include "rlgl.h"
 #include <math.h>
 #include <stdio.h>
@@ -180,9 +181,9 @@ void sparkles_queue_render(float screen_w, float screen_h) {
     float row_h = 32.0f;
     int max_rows = (int)(list_h / row_h);
 
-    if (interactive && CheckCollisionPointRec(mouse, (Rectangle){ box.x, list_y, box.width, list_h })) {
-        s_queue_scroll -= (int)GetMouseWheelMove() * 3;
-        if (s_queue_scroll < 0) s_queue_scroll = 0;
+    float scroll = sparkles_input_get_scroll_delta(box);
+    if (interactive && scroll != 0.0f) {
+        s_queue_scroll += (int)roundf(scroll);
         if (s_queue_scroll > count - max_rows) s_queue_scroll = count - max_rows;
         if (s_queue_scroll < 0) s_queue_scroll = 0;
     }
@@ -267,8 +268,9 @@ void sparkles_queue_render(float screen_w, float screen_h) {
             break;
         }
 
-        // Left-click to play immediately from queue
-        if (interactive && hover_row && !hover_del && !hover_handle && s_dragged_idx == -1 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        // Tap to play from queue
+        Vector2 tap;
+        if (interactive && !hover_del && !hover_handle && s_dragged_idx == -1 && sparkles_input_consume_tap(row_rect, &tap)) {
             if (current_play_source != SOURCE_QUEUE && current_play_source != SOURCE_NONE) {
                 base_play_source = current_play_source;
                 base_playing_idx = playing_file_idx;

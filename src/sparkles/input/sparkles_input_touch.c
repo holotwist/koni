@@ -53,21 +53,12 @@ static void touch_update(float dt) {
             // Long press detection (~450ms within 10px slop)
             if (!s_long_pressed && s_touch_time >= 0.45f && dist < 10.0f) {
                 s_long_pressed = true;
-                sparkles_input_emit_gesture((SparklesGesture){
-                    .type = SPARKLES_GESTURE_LONG_PRESS,
-                    .pos = s_touch_start,
-                    .delta = {0},
-                    .velocity = {0}
-                });
+                sparkles_input_emit_long_press(s_touch_start);
             }
 
-            if (delta.x != 0.0f || delta.y != 0.0f) {
-                sparkles_input_emit_gesture((SparklesGesture){
-                    .type = SPARKLES_GESTURE_DRAG_MOVE,
-                    .pos = pos,
-                    .delta = delta,
-                    .velocity = { delta.x / (dt > 0 ? dt : 0.016f), delta.y / (dt > 0 ? dt : 0.016f) }
-                });
+            // Convert vertical finger delta to list scroll steps
+            if (fabsf(delta.y) > 0.0f && dist > 10.0f) {
+                sparkles_input_add_scroll(pos, -delta.y / 28.0f);
             }
             s_last_pos = pos;
         }
@@ -75,6 +66,12 @@ static void touch_update(float dt) {
         s_touch_down = false;
         float dist = v2_dist(s_touch_start, s_touch_current);
         Vector2 total_delta = { s_touch_current.x - s_touch_start.x, s_touch_current.y - s_touch_start.y };
+
+        // Kinetic fling momentum
+        float vel_y = (s_touch_time > 0.02f) ? (total_delta.y / s_touch_time) : 0.0f;
+        if (fabsf(vel_y) > 180.0f) {
+            sparkles_input_set_fling(-vel_y / 28.0f);
+        }
 
         // Universal edge swipe from right border pulls radial list
         if (s_touch_start.x >= sw - 24.0f && total_delta.x < -40.0f) {
@@ -92,20 +89,8 @@ static void touch_update(float dt) {
         }
         // Tap
         else if (!s_long_pressed && dist < 12.0f && s_touch_time < 0.40f) {
-            sparkles_input_emit_gesture((SparklesGesture){
-                .type = SPARKLES_GESTURE_TAP,
-                .pos = s_touch_current,
-                .delta = {0},
-                .velocity = {0}
-            });
+            sparkles_input_emit_tap(s_touch_current);
         }
-
-        sparkles_input_emit_gesture((SparklesGesture){
-            .type = SPARKLES_GESTURE_DRAG_END,
-            .pos = s_touch_current,
-            .delta = {0},
-            .velocity = {0}
-        });
     }
 
     if (IsKeyPressed(KEY_BACK)) {

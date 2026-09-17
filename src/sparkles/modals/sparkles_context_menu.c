@@ -4,6 +4,7 @@
 #include "sparkles_widgets.h"
 #include "state.h"
 #include "playlist_manager.h"
+#include "sparkles_text_prompt.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -22,11 +23,6 @@ static char s_target_playlist[128] = {0};
 static int s_hovered_idx = -1;
 static bool s_show_subplaylists = false;
 static int s_sub_hovered_idx = -1;
-
-// New playlist prompt state
-static bool s_prompt_new_pl = false;
-static char s_new_pl_buf[64] = {0};
-static int s_new_pl_len = 0;
 
 #define MENU_WIDTH 210.0f
 #define ITEM_HEIGHT 28.0f
@@ -137,12 +133,17 @@ static void queue_add_tail(const SparklesTrackItem *item) {
     pthread_mutex_unlock(&state_mutex);
 }
 
+static void on_new_playlist_submitted(const char *name, void *ud) {
+    (void)ud;
+    if (!name || !name[0]) return;
+    playlist_mgmt_create(name);
+    playlist_mgmt_add_track(name, s_track.path, s_track.title, s_track.artist, s_track.duration_sec);
+    tile_playlists_refresh();
+}
+
 void sparkles_context_menu_init(void) {
     s_menu_open = false;
     s_show_subplaylists = false;
-    s_prompt_new_pl = false;
-    s_new_pl_buf[0] = '\0';
-    s_new_pl_len = 0;
 }
 
 void sparkles_context_menu_open(Vector2 mouse_pos, const SparklesTrackItem *track) {
@@ -197,64 +198,14 @@ void sparkles_context_menu_open_playlist(Vector2 mouse_pos, const char *playlist
 void sparkles_context_menu_close(void) {
     s_menu_open = false;
     s_show_subplaylists = false;
-    s_prompt_new_pl = false;
 }
 
 bool sparkles_context_menu_is_open(void) {
-    return s_menu_open || s_prompt_new_pl;
+    return s_menu_open;
 }
 
 bool sparkles_context_menu_update(void) {
     Vector2 m = GetMousePosition();
-
-    // Handle modal dialog input when creating a new playlist
-    if (s_prompt_new_pl) {
-        float sw = (float)GetScreenWidth();
-        float sh = (float)GetScreenHeight();
-        float qw = 460.0f;
-        float qh = 160.0f;
-        Rectangle q_box = { (sw - qw) * 0.5f, (sh - qh) * 0.5f, qw, qh };
-        Rectangle btn_create = { q_box.x + q_box.width - 180, q_box.y + q_box.height - 42, 80, 26 };
-        Rectangle btn_cancel = { q_box.x + q_box.width - 92,  q_box.y + q_box.height - 42, 72, 26 };
-
-        int c = GetCharPressed();
-        while (c > 0) {
-            if (c >= 32 && c <= 126 && s_new_pl_len < (int)sizeof(s_new_pl_buf) - 1) {
-                s_new_pl_buf[s_new_pl_len++] = (char)c;
-                s_new_pl_buf[s_new_pl_len] = '\0';
-            }
-            c = GetCharPressed();
-        }
-
-        if (IsKeyPressed(KEY_BACKSPACE) && s_new_pl_len > 0) {
-            s_new_pl_buf[--s_new_pl_len] = '\0';
-        }
-
-        bool do_create = (IsKeyPressed(KEY_ENTER) && s_new_pl_len > 0);
-        bool do_cancel = IsKeyPressed(KEY_ESCAPE);
-
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            if (CheckCollisionPointRec(m, btn_create) && s_new_pl_len > 0) do_create = true;
-            else if (CheckCollisionPointRec(m, btn_cancel)) do_cancel = true;
-            else if (!CheckCollisionPointRec(m, q_box)) do_cancel = true;
-        }
-
-        if (do_cancel) {
-            s_prompt_new_pl = false;
-            sparkles_context_menu_close();
-            return true;
-        }
-
-        if (do_create) {
-            playlist_mgmt_create(s_new_pl_buf);
-            playlist_mgmt_add_track(s_new_pl_buf, s_track.path, s_track.title, s_track.artist, s_track.duration_sec);
-            s_prompt_new_pl = false;
-            sparkles_context_menu_close();
-            return true;
-        }
-        return true;
-    }
-
     if (!s_menu_open) return false;
     if (s_just_opened) {
         s_just_opened = false;
@@ -341,11 +292,15 @@ bool sparkles_context_menu_update(void) {
             playlist_mgmt_remove_track(s_track.playlist_name, s_track.playlist_track_idx);
             tile_playlists_refresh();
             sparkles_context_menu_close();
-        } else if (s_sub_hovered_idx == 0) { // + [New Playlist]
-            s_prompt_new_pl = true;
-            s_new_pl_buf[0] = '\0';
-            s_new_pl_len = 0;
+        } else if (s_sub_hovered_idx == 0) {
             s_menu_open = false;
+            sparkles_text_prompt_open(&(SparklesTextPromptConfig){
+                .tag = "NEW PLAYLIST",
+                .prompt = "New Playlist Name",
+                .submit_label = "Create",
+                .max_len = 64,
+                .on_submit = on_new_playlist_submitted
+            });
             return true;
         } else if (s_sub_hovered_idx > 0 && s_sub_hovered_idx <= pl_count) {
             const PlaylistSummary *ps = playlist_mgmt_get_summary(s_sub_hovered_idx - 1);
@@ -361,43 +316,7 @@ bool sparkles_context_menu_update(void) {
 }
 
 void sparkles_context_menu_render(float screen_w, float screen_h) {
-    // Render New Playlist text prompt modal if active
-    if (s_prompt_new_pl) {
-        DrawRectangle(0, 0, (int)screen_w, (int)screen_h, ColorAlpha(BLACK, 0.78f));
-        float qw = 460.0f;
-        float qh = 160.0f;
-        Rectangle q_box = { (screen_w - qw) * 0.5f, (screen_h - qh) * 0.5f, qw, qh };
-
-        DrawRectangleRec(q_box, (Color){ 8, 8, 11, 255 });
-        DrawRectangleLinesEx(q_box, 1.0f, COLOR_ACCENT);
-        DrawNothingCornerBrackets(q_box, 8.0f, COLOR_ACCENT);
-
-        DrawText("New Playlist", (int)q_box.x + 20, (int)q_box.y + 16, 10, COLOR_TEXT_MUTED);
-        DrawText("New Playlist Name", (int)q_box.x + 20, (int)q_box.y + 34, FONT_SIZE_MD, COLOR_TEXT_PRIMARY);
-
-        Rectangle input_box = { q_box.x + 20, q_box.y + 64, q_box.width - 40, 32 };
-        DrawRectangleRec(input_box, (Color){ 14, 15, 18, 255 });
-        DrawRectangleLinesEx(input_box, 1.0f, (Color){ 35, 38, 46, 255 });
-        const char *cur = ((int)(GetTime() * 2.5f) % 2 == 0) ? "_" : " ";
-        DrawText(TextFormat("%s%s", s_new_pl_buf, cur), (int)input_box.x + 10, (int)input_box.y + 8, FONT_SIZE_MD, COLOR_TEXT_PRIMARY);
-
-        Vector2 m = GetMousePosition();
-        Rectangle btn_create = { q_box.x + q_box.width - 180, q_box.y + q_box.height - 42, 80, 26 };
-        Rectangle btn_cancel = { q_box.x + q_box.width - 92,  q_box.y + q_box.height - 42, 72, 26 };
-
-        bool hover_create = CheckCollisionPointRec(m, btn_create);
-        bool hover_cancel = CheckCollisionPointRec(m, btn_cancel);
-
-        DrawRectangleRec(btn_create, (hover_create && s_new_pl_len > 0) ? ColorAlpha(COLOR_ACCENT, 0.25f) : (Color){ 18, 19, 24, 255 });
-        DrawRectangleLinesEx(btn_create, 1.0f, (hover_create && s_new_pl_len > 0) ? COLOR_ACCENT : (s_new_pl_len > 0 ? COLOR_TEXT_PRIMARY : COLOR_TEXT_DARK));
-        DrawText("Create", (int)btn_create.x + (btn_create.width - MeasureText("Create", FONT_SIZE_SM)) / 2, (int)btn_create.y + 6, FONT_SIZE_SM, s_new_pl_len > 0 ? COLOR_TEXT_PRIMARY : COLOR_TEXT_DARK);
-
-        DrawRectangleRec(btn_cancel, hover_cancel ? ColorAlpha(COLOR_ACCENT, 0.25f) : (Color){ 18, 19, 24, 255 });
-        DrawRectangleLinesEx(btn_cancel, 1.0f, hover_cancel ? COLOR_ACCENT : COLOR_TEXT_MUTED);
-        DrawText("Cancel", (int)btn_cancel.x + (btn_cancel.width - MeasureText("Cancel", FONT_SIZE_SM)) / 2, (int)btn_cancel.y + 6, FONT_SIZE_SM, COLOR_TEXT_PRIMARY);
-        return;
-    }
-
+    (void)screen_w; (void)screen_h;
     if (!s_menu_open) return;
 
     const char *items[5];

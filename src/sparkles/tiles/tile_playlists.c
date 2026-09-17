@@ -3,9 +3,11 @@
 #include "playlist_manager.h"
 #include "state.h"
 #include "modals/sparkles_context_menu.h"
+#include "input/sparkles_input.h"
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
+#include <math.h>
 
 static bool s_drilldown = false;
 static char s_active_pl_name[128] = {0};
@@ -187,26 +189,25 @@ void tile_playlists_input(SparklesTile *tile, Rectangle b) {
         }
     }
 
-    // Mouse Wheel Scrolling
-    if (CheckCollisionPointRec(m, b)) {
-        float wheel = GetMouseWheelMove();
-        if (wheel != 0.0f) {
-            s_pl_scroll -= (int)wheel * 2;
-            if (s_pl_scroll < 0) s_pl_scroll = 0;
-        }
+    // Drag & wheel scroll
+    float scroll = sparkles_input_get_scroll_delta(b);
+    if (scroll != 0.0f) {
+        s_pl_scroll += (int)roundf(scroll);
+        if (s_pl_scroll < 0) s_pl_scroll = 0;
     }
 
-    // Right-Click Context Menu handlers
-    if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && CheckCollisionPointRec(m, b)) {
-        if (m.y >= b.y + 50.0f) {
-            int clicked = s_pl_scroll + (int)(m.y - (b.y + 50.0f)) / 30;
+    // Long-press or right-click context menu
+    Vector2 lp;
+    if (sparkles_input_consume_long_press(b, &lp)) {
+        if (lp.y >= b.y + 50.0f) {
+            int clicked = s_pl_scroll + (int)(lp.y - (b.y + 50.0f)) / 30;
             if (!s_drilldown) {
                 int count = 0;
                 for (int p = 0; p < playlist_mgmt_get_count(); p++) {
                     const PlaylistSummary *ps = playlist_mgmt_get_summary(p);
                     if (!s_pl_search_active || s_pl_search_len == 0 || (ps && str_contains_ci(ps->name, s_pl_search_buf))) {
                         if (count == clicked && ps) {
-                            sparkles_context_menu_open_playlist(m, ps->name);
+                            sparkles_context_menu_open_playlist(lp, ps->name);
                             return;
                         }
                         count++;
@@ -222,7 +223,7 @@ void tile_playlists_input(SparklesTile *tile, Rectangle b) {
                     item.in_playlist = true;
                     strncpy(item.playlist_name, s_active_pl_name, sizeof(item.playlist_name) - 1);
                     item.playlist_track_idx = clicked;
-                    sparkles_context_menu_open(m, &item);
+                    sparkles_context_menu_open(lp, &item);
                     return;
                 }
             }
@@ -230,21 +231,21 @@ void tile_playlists_input(SparklesTile *tile, Rectangle b) {
         return;
     }
 
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, b)) {
-        // Toggle Search
+    // Tap or left-click
+    Vector2 tap;
+    if (sparkles_input_consume_tap(b, &tap)) {
         int search_btn_w = MeasureText("[Search]", FONT_SIZE_SM);
-        if (!s_drilldown && !s_pl_search_active && CheckCollisionPointRec(m, (Rectangle){ b.x + b.width - search_btn_w - 24, b.y + 12, search_btn_w + 12, 26 })) {
+        if (!s_drilldown && !s_pl_search_active && CheckCollisionPointRec(tap, (Rectangle){ b.x + b.width - search_btn_w - 24, b.y + 12, search_btn_w + 12, 26 })) {
             s_pl_search_active = true;
             return;
         }
-        // Close Search
-        if (s_pl_search_active && CheckCollisionPointRec(m, (Rectangle){ b.x + b.width - 38, b.y + 12, 28, 25 })) {
+        if (s_pl_search_active && CheckCollisionPointRec(tap, (Rectangle){ b.x + b.width - 38, b.y + 12, 28, 25 })) {
             tile_playlists_close_search();
             return;
         }
 
         if (!s_drilldown) {
-            int clicked = s_pl_scroll + (int)(m.y - (b.y + 50)) / 28;
+            int clicked = s_pl_scroll + (int)(tap.y - (b.y + 50)) / 28;
             int count = 0;
             for (int p = 0; p < playlist_mgmt_get_count(); p++) {
                 const PlaylistSummary *ps = playlist_mgmt_get_summary(p);
@@ -263,16 +264,14 @@ void tile_playlists_input(SparklesTile *tile, Rectangle b) {
                 }
             }
         } else {
-            // Click Back button
-            if (CheckCollisionPointRec(m, (Rectangle){ b.x + 14, b.y + 12, 90, 30 })) {
+            if (CheckCollisionPointRec(tap, (Rectangle){ b.x + 14, b.y + 12, 90, 30 })) {
                 s_drilldown = false;
                 s_pl_scroll = 0;
                 playlist_mgmt_free_loaded(&s_loaded_pl);
                 return;
             }
 
-            // Click song inside playlist
-            int clicked = s_pl_scroll + (int)(m.y - (b.y + 50)) / 28;
+            int clicked = s_pl_scroll + (int)(tap.y - (b.y + 50)) / 28;
             if (clicked >= 0 && clicked < s_loaded_pl.count) {
                 pthread_mutex_lock(&state_mutex);
                 if (active_playlist_playback.paths) {

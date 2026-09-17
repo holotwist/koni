@@ -1,10 +1,21 @@
 #include "sparkles_input.h"
 #include <string.h>
+#include <math.h>
 
 #define EVENT_QUEUE_CAPACITY 32
 
 static const SparklesInputDriver *s_current_driver = NULL;
 static SparklesPointer s_pointer = {0};
+
+static bool s_has_tap = false;
+static Vector2 s_tap_pos = {0};
+
+static bool s_has_lp = false;
+static Vector2 s_lp_pos = {0};
+
+static float s_scroll_delta = 0.0f;
+static Vector2 s_scroll_pos = {0};
+static float s_fling_velocity = 0.0f;
 
 static SparklesGesture s_gesture_queue[EVENT_QUEUE_CAPACITY];
 static int s_gesture_head = 0;
@@ -47,9 +58,78 @@ void sparkles_input_set_driver(const SparklesInputDriver *driver) {
 }
 
 void sparkles_input_update(float dt) {
+    // Reset frame-level queries
+    s_has_tap = false;
+    s_has_lp = false;
+    s_scroll_delta = 0.0f;
+
+    // Apply kinetic momentum decay
+    if (fabsf(s_fling_velocity) > 0.01f) {
+        s_scroll_delta += s_fling_velocity * dt;
+        s_fling_velocity *= expf(-dt * 6.0f);
+        if (fabsf(s_fling_velocity) < 0.1f) s_fling_velocity = 0.0f;
+    }
+
     if (s_current_driver && s_current_driver->update) {
         s_current_driver->update(dt);
     }
+}
+
+void sparkles_input_emit_tap(Vector2 pos) {
+    s_has_tap = true;
+    s_tap_pos = pos;
+    sparkles_input_emit_gesture((SparklesGesture){
+        .type = SPARKLES_GESTURE_TAP,
+        .pos = pos,
+        .delta = {0},
+        .velocity = {0}
+    });
+}
+
+void sparkles_input_emit_long_press(Vector2 pos) {
+    s_has_lp = true;
+    s_lp_pos = pos;
+    sparkles_input_emit_gesture((SparklesGesture){
+        .type = SPARKLES_GESTURE_LONG_PRESS,
+        .pos = pos,
+        .delta = {0},
+        .velocity = {0}
+    });
+}
+
+void sparkles_input_add_scroll(Vector2 pos, float delta) {
+    s_scroll_delta += delta;
+    s_scroll_pos = pos;
+}
+
+void sparkles_input_set_fling(float velocity_y) {
+    s_fling_velocity = velocity_y;
+}
+
+bool sparkles_input_consume_tap(Rectangle bounds, Vector2 *out_pos) {
+    if (s_has_tap && CheckCollisionPointRec(s_tap_pos, bounds)) {
+        if (out_pos) *out_pos = s_tap_pos;
+        s_has_tap = false;
+        return true;
+    }
+    return false;
+}
+
+bool sparkles_input_consume_long_press(Rectangle bounds, Vector2 *out_pos) {
+    if (s_has_lp && CheckCollisionPointRec(s_lp_pos, bounds)) {
+        if (out_pos) *out_pos = s_lp_pos;
+        s_has_lp = false;
+        return true;
+    }
+    return false;
+}
+
+float sparkles_input_get_scroll_delta(Rectangle bounds) {
+    Vector2 m = GetMousePosition();
+    if (CheckCollisionPointRec(m, bounds) || CheckCollisionPointRec(s_scroll_pos, bounds)) {
+        return s_scroll_delta;
+    }
+    return 0.0f;
 }
 
 const SparklesPointer* sparkles_input_get_pointer(void) {

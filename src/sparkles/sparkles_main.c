@@ -20,6 +20,7 @@
 #include "views/sparkles_player_view.h"
 #include "widgets/sparkles_radial_list.h"
 #include "modals/sparkles_settings.h"
+#include "modals/sparkles_text_prompt.h"
 #include "protocols/mpris.h"
 #include "input/sparkles_input.h"
 #include <curl/curl.h>
@@ -78,6 +79,7 @@ int main(int argc, char **argv) {
     sparkles_radial_list_init();
     sparkles_player_view_init();
     sparkles_settings_init();
+    sparkles_text_prompt_init();
     sparkles_input_init();
     SparklesGrid grid;
     sparkles_grid_init(&grid);
@@ -88,7 +90,7 @@ int main(int argc, char **argv) {
         bool is_searching = tile_song_list_is_searching() || tile_playlists_is_searching() ||
                             sparkles_radial_list_is_open() || sparkles_vis_picker_is_open() ||
                             sparkles_settings_is_open() || sparkles_input_is_text_active() ||
-                            s_show_quit_modal;
+                            sparkles_text_prompt_is_open() || s_show_quit_modal;
         sparkles_input_set_text_focused(is_searching);
         sparkles_input_update(dt);
         float sw = (float)GetScreenWidth();
@@ -99,7 +101,8 @@ int main(int argc, char **argv) {
         while (sparkles_input_poll_action(&act)) {
             switch (act) {
                 case SPARKLES_ACTION_BACK:
-                    if (s_show_quit_modal) s_show_quit_modal = false;
+                    if (sparkles_text_prompt_is_open()) sparkles_text_prompt_close();
+                    else if (s_show_quit_modal) s_show_quit_modal = false;
                     else if (sparkles_settings_is_open()) sparkles_settings_close();
                     else if (sparkles_radial_list_is_open()) sparkles_radial_list_close();
                     else if (sparkles_vis_picker_is_open()) sparkles_vis_picker_close();
@@ -213,9 +216,14 @@ int main(int argc, char **argv) {
 
         // Process modals and popups first
         bool modal_active = !app_config.listening_profile_asked || s_show_lyrics_modal ||
-                            s_show_quit_modal || sparkles_context_menu_is_open() ||
-                            sparkles_queue_is_open() || sparkles_radial_list_is_open() ||
-                            sparkles_vis_picker_is_open() || sparkles_settings_is_open();
+                            s_show_quit_modal || sparkles_text_prompt_is_open() ||
+                            sparkles_context_menu_is_open() || sparkles_queue_is_open() ||
+                            sparkles_radial_list_is_open() || sparkles_vis_picker_is_open() ||
+                            sparkles_settings_is_open();
+
+        if (sparkles_text_prompt_is_open()) {
+            sparkles_text_prompt_update();
+        }
 
         if (sparkles_settings_is_open()) {
             sparkles_settings_handle_input(sw, sh);
@@ -343,6 +351,11 @@ int main(int argc, char **argv) {
         // Dynamic Right-Click context Menu
         if (sparkles_context_menu_is_open()) {
             sparkles_context_menu_render(sw, sh);
+        }
+
+        // Top-anchored text prompt modal
+        if (sparkles_text_prompt_is_open()) {
+            sparkles_text_prompt_render(sw, sh);
         }
 
         // Listening profile permission dialog modal
