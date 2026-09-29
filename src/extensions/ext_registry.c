@@ -8,12 +8,18 @@
 #include <string.h>
 #include <stdarg.h>
 
+#if !defined(__ANDROID__) && !defined(PLATFORM_ANDROID)
 extern KoniExtension tracker_extension;
 
 static const KoniExtension *registered_extensions[] = {
     &tracker_extension,
     NULL
 };
+#else
+static const KoniExtension *registered_extensions[] = {
+    NULL
+};
+#endif
 
 // Host Context Implementation 
 static bool host_is_playing(void) {
@@ -86,12 +92,16 @@ static void host_request_redraw(void) {
 }
 
 static void host_set_status_message(const char *fmt, ...) {
+#if !defined(__ANDROID__) && !defined(PLATFORM_ANDROID)
     va_list args;
     va_start(args, fmt);
     char buf[256];
     vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
     ui_status_set("%s", buf);
+#else
+    (void)fmt;
+#endif
 }
 
 static KoniHostContext g_host_ctx = {

@@ -16,29 +16,6 @@ static inline uint32_t read_u32(FILE *f) {
     return ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) | ((uint32_t)b[2] << 8) | (uint32_t)b[3];
 }
 
-static char* save_temp_cover(const uint8_t *data, size_t size, bool is_png) {
-    char tmpl[] = "/tmp/koni_cover_XXXXXX";
-    int fd = mkstemp(tmpl);
-    if (fd < 0) return NULL;
-
-    size_t written = 0;
-    while (written < size) {
-        ssize_t res = write(fd, data + written, size - written);
-        if (res < 0) break;
-        written += res;
-    }
-    close(fd);
-
-    const char *ext = is_png ? ".png" : ".jpg";
-    char new_path[256];
-    snprintf(new_path, sizeof(new_path), "%s%s", tmpl, ext);
-    rename(tmpl, new_path);
-
-    char *url = malloc(256);
-    if (url) snprintf(url, 256, "file://%s", new_path);
-    return url;
-}
-
 static char* extract_data_atom_text(FILE *f, uint64_t item_end) {
     while ((uint64_t)ftell(f) + 8 <= item_end) {
         uint64_t box_start = (uint64_t)ftell(f);
@@ -134,7 +111,7 @@ static void parse_ilst(FILE *f, uint64_t ilst_end, KoniMetadata *meta) {
                     uint8_t *img_buf = malloc(img_sz);
                     if (img_buf && fread(img_buf, 1, img_sz, f) == img_sz) {
                         bool is_png = ((flags & 0xFF) == 14) || (img_sz >= 4 && img_buf[0] == 0x89 && img_buf[1] == 'P');
-                        meta->art_url = save_temp_cover(img_buf, img_sz, is_png);
+                        meta->art_url = koni_codec_save_temp_art(img_buf, img_sz, is_png ? ".png" : ".jpg");
                     }
                     if (img_buf) free(img_buf);
                     break;

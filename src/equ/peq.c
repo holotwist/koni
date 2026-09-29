@@ -1,6 +1,7 @@
 #define _DEFAULT_SOURCE
 #define _GNU_SOURCE
 #include "peq.h"
+#include "koni_paths.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -27,6 +28,19 @@ static PEQBiquad s_filters[PEQ_MAX_BANDS];
 static float s_preamp_db = 0.0f;
 static float s_current_preamp_mult = 1.0f;
 static uint32_t s_sample_rate = 44100;
+static char s_peq_active_preset[128] = "Flat (Pass-through)";
+
+const char* peq_get_active_preset_name(void) {
+    return s_peq_active_preset;
+}
+
+void peq_set_active_preset_name(const char *name) {
+    if (!name || !name[0]) return;
+    pthread_mutex_lock(&s_peq_mutex);
+    strncpy(s_peq_active_preset, name, sizeof(s_peq_active_preset) - 1);
+    s_peq_active_preset[sizeof(s_peq_active_preset) - 1] = '\0';
+    pthread_mutex_unlock(&s_peq_mutex);
+}
 
 static const char *s_filter_names[] = {
     "PK", "LSQ", "HSQ", "HP", "LP"
@@ -127,6 +141,10 @@ static void compute_coefficients(PEQBiquad *bq, const PEQBand *band, uint32_t sr
     bq->a2 = a2 / a0;
 }
 
+static const float s_default_freqs[PEQ_MAX_BANDS] = {
+    32.0f, 64.0f, 125.0f, 250.0f, 500.0f, 1000.0f, 2000.0f, 4000.0f, 8000.0f, 16000.0f
+};
+
 static void recalculate_all_locked(uint32_t srate) {
     if (srate == 0) srate = 44100;
     s_sample_rate = srate;
@@ -135,35 +153,25 @@ static void recalculate_all_locked(uint32_t srate) {
     }
 }
 
-void peq_init(void) {
-    pthread_mutex_lock(&s_peq_mutex);
-    s_preamp_db = 0.0f;
-    s_current_preamp_mult = 1.0f;
-
-    static const float def_freqs[PEQ_MAX_BANDS] = {
-        32.0f, 64.0f, 125.0f, 250.0f, 500.0f, 1000.0f, 2000.0f, 4000.0f, 8000.0f, 16000.0f
-    };
-
-    for (int i = 0; i < PEQ_MAX_BANDS; i++) {
-        s_bands[i].enabled = true;
-        s_bands[i].type = (i == 0) ? PEQ_FILTER_LOW_SHELF : ((i == PEQ_MAX_BANDS - 1) ? PEQ_FILTER_HIGH_SHELF : PEQ_FILTER_PEAK);
-        s_bands[i].freq = def_freqs[i];
-        s_bands[i].gain_db = 0.0f;
-        s_bands[i].q = 0.7071f;
-    }
-
-    memset(s_filters, 0, sizeof(s_filters));
-    recalculate_all_locked(44100);
-    pthread_mutex_unlock(&s_peq_mutex);
-}
-
 static void peq_reset_locked(void) {
     s_preamp_db = 0.0f;
     for (int i = 0; i < PEQ_MAX_BANDS; i++) {
+        s_bands[i].enabled = true;
+        s_bands[i].type = (i == 0) ? PEQ_FILTER_LOW_SHELF : ((i == PEQ_MAX_BANDS - 1) ? PEQ_FILTER_HIGH_SHELF : PEQ_FILTER_PEAK);
+        s_bands[i].freq = s_default_freqs[i];
         s_bands[i].gain_db = 0.0f;
+        s_bands[i].q = 0.7071f;
         memset(s_filters[i].s1, 0, sizeof(s_filters[i].s1));
         memset(s_filters[i].s2, 0, sizeof(s_filters[i].s2));
     }
+}
+
+void peq_init(void) {
+    pthread_mutex_lock(&s_peq_mutex);
+    s_current_preamp_mult = 1.0f;
+    peq_reset_locked();
+    recalculate_all_locked(44100);
+    pthread_mutex_unlock(&s_peq_mutex);
 }
 
 void peq_reset(void) {
@@ -189,6 +197,7 @@ void peq_set_band(int idx, const PEQBand *band) {
     if (idx < 0 || idx >= PEQ_MAX_BANDS || !band) return;
     pthread_mutex_lock(&s_peq_mutex);
     s_bands[idx] = *band;
+    strncpy(s_peq_active_preset, "Custom", sizeof(s_peq_active_preset) - 1);
     compute_coefficients(&s_filters[idx], &s_bands[idx], s_sample_rate);
     pthread_mutex_unlock(&s_peq_mutex);
 }
@@ -285,7 +294,11 @@ const PEQPresetDef* peq_get_builtin_preset(int idx) {
 void peq_apply_builtin_preset(int idx) {
     pthread_mutex_lock(&s_peq_mutex);
     peq_reset_locked();
+    if (idx >= 0 && idx < peq_get_builtin_preset_count()) {
+        strncpy(s_peq_active_preset, s_builtin_presets[idx].name, sizeof(s_peq_active_preset) - 1);
+    }
 
+    int used_bands = 0;
     switch (idx) {
         case 0: // Harman Over-Ear
             s_preamp_db = -5.5f;
@@ -295,6 +308,7 @@ void peq_apply_builtin_preset(int idx) {
             s_bands[3] = (PEQBand){ true, PEQ_FILTER_PEAK,       3000.0f, +3.5f, 1.80f };
             s_bands[4] = (PEQBand){ true, PEQ_FILTER_PEAK,       5800.0f, -2.0f, 3.50f };
             s_bands[5] = (PEQBand){ true, PEQ_FILTER_HIGH_SHELF, 10000.0f, -1.5f, 0.71f };
+            used_bands = 6;
             break;
 
         case 1: // Harman In-Ear (IEM)
@@ -305,6 +319,7 @@ void peq_apply_builtin_preset(int idx) {
             s_bands[3] = (PEQBand){ true, PEQ_FILTER_PEAK,       2800.0f, +4.5f, 2.20f };
             s_bands[4] = (PEQBand){ true, PEQ_FILTER_PEAK,       6000.0f, -3.0f, 4.00f };
             s_bands[5] = (PEQBand){ true, PEQ_FILTER_HIGH_SHELF, 10000.0f, -2.0f, 0.71f };
+            used_bands = 6;
             break;
 
         case 2: // Diffuse Field (Neutral)
@@ -313,6 +328,7 @@ void peq_apply_builtin_preset(int idx) {
             s_bands[1] = (PEQBand){ true, PEQ_FILTER_PEAK,        3000.0f, +3.0f, 1.50f };
             s_bands[2] = (PEQBand){ true, PEQ_FILTER_PEAK,        6000.0f, -2.5f, 3.00f };
             s_bands[3] = (PEQBand){ true, PEQ_FILTER_HIGH_SHELF, 12000.0f, -1.0f, 0.71f };
+            used_bands = 4;
             break;
 
         case 3: // Warm & Relaxed
@@ -322,6 +338,7 @@ void peq_apply_builtin_preset(int idx) {
             s_bands[2] = (PEQBand){ true, PEQ_FILTER_PEAK,       3500.0f, -2.0f, 2.00f };
             s_bands[3] = (PEQBand){ true, PEQ_FILTER_PEAK,       6000.0f, -3.5f, 3.00f };
             s_bands[4] = (PEQBand){ true, PEQ_FILTER_HIGH_SHELF,  9000.0f, -2.5f, 0.71f };
+            used_bands = 5;
             break;
 
         case 4: // Vocal & Acoustic Presence
@@ -331,6 +348,7 @@ void peq_apply_builtin_preset(int idx) {
             s_bands[2] = (PEQBand){ true, PEQ_FILTER_PEAK,       1500.0f, +2.5f, 1.40f };
             s_bands[3] = (PEQBand){ true, PEQ_FILTER_PEAK,       3200.0f, +3.0f, 1.80f };
             s_bands[4] = (PEQBand){ true, PEQ_FILTER_HIGH_SHELF, 11000.0f, +1.5f, 0.71f };
+            used_bands = 5;
             break;
 
         case 5: // Deep Sub-Bass
@@ -339,6 +357,7 @@ void peq_apply_builtin_preset(int idx) {
             s_bands[1] = (PEQBand){ true, PEQ_FILTER_LOW_SHELF,    80.0f, +7.0f, 0.85f };
             s_bands[2] = (PEQBand){ true, PEQ_FILTER_PEAK,        180.0f, -2.0f, 1.50f };
             s_bands[3] = (PEQBand){ true, PEQ_FILTER_PEAK,       4500.0f, +1.5f, 2.00f };
+            used_bands = 4;
             break;
 
         case 6: // Treble Air & Sparkle
@@ -346,12 +365,23 @@ void peq_apply_builtin_preset(int idx) {
             s_bands[0] = (PEQBand){ true, PEQ_FILTER_PEAK,       4000.0f, +2.0f, 1.80f };
             s_bands[1] = (PEQBand){ true, PEQ_FILTER_HIGH_SHELF,  8500.0f, +3.5f, 0.71f };
             s_bands[2] = (PEQBand){ true, PEQ_FILTER_PEAK,      12000.0f, +2.5f, 2.50f };
+            used_bands = 3;
             break;
 
         case 7: // Flat
         default:
             s_preamp_db = 0.0f;
+            used_bands = PEQ_MAX_BANDS;
             break;
+    }
+
+    // Turn off and reset frequencies of bands not used by the preset
+    for (int b = used_bands; b < PEQ_MAX_BANDS; b++) {
+        s_bands[b].enabled = false;
+        s_bands[b].gain_db = 0.0f;
+        s_bands[b].freq = s_default_freqs[b];
+        s_bands[b].q = 0.7071f;
+        s_bands[b].type = PEQ_FILTER_PEAK;
     }
 
     recalculate_all_locked(s_sample_rate);
@@ -446,27 +476,30 @@ bool peq_load_file(const char *filepath) {
         }
     }
 
+    // Turn off remaining bands not specified in file
+    for (int b = band_idx; b < PEQ_MAX_BANDS; b++) {
+        s_bands[b].enabled = false;
+        s_bands[b].gain_db = 0.0f;
+        s_bands[b].freq = s_default_freqs[b];
+        s_bands[b].q = 0.7071f;
+        s_bands[b].type = PEQ_FILTER_PEAK;
+    }
+
     fclose(fp);
+    const char *slash = strrchr(filepath, '/');
+    const char *fname = slash ? slash + 1 : filepath;
+    strncpy(s_peq_active_preset, fname, sizeof(s_peq_active_preset) - 1);
+    char *dot = strrchr(s_peq_active_preset, '.');
+    if (dot) *dot = '\0';
     recalculate_all_locked(s_sample_rate);
     pthread_mutex_unlock(&s_peq_mutex);
     return true;
 }
 
 static void ensure_peq_dir(void) {
-    const char *home = getenv("HOME");
-    if (!home) return;
     char dir[1024];
-    snprintf(dir, sizeof(dir), "%s/.config/koni/peq", home);
-    char tmp[1024];
-    snprintf(tmp, sizeof(tmp), "%s", dir);
-    for (char *p = tmp + 1; *p; p++) {
-        if (*p == '/') {
-            *p = 0;
-            mkdir(tmp, 0755);
-            *p = '/';
-        }
-    }
-    mkdir(tmp, 0755);
+    koni_get_path(dir, sizeof(dir), "peq");
+    koni_ensure_dir(dir);
 }
 
 bool peq_save_file(const char *filepath) {
@@ -495,11 +528,10 @@ bool peq_save_file(const char *filepath) {
 
 int peq_scan_user_presets(char out_names[][128], char out_paths[][1024], int max_count) {
     ensure_peq_dir();
-    const char *home = getenv("HOME");
-    if (!home || max_count <= 0) return 0;
+    if (max_count <= 0) return 0;
 
     char dir_path[1024];
-    snprintf(dir_path, sizeof(dir_path), "%s/.config/koni/peq", home);
+    koni_get_path(dir_path, sizeof(dir_path), "peq");
 
     DIR *d = opendir(dir_path);
     if (!d) return 0;
@@ -526,6 +558,7 @@ void peq_save_state(void *file_ptr) {
     FILE *f = (FILE*)file_ptr;
     if (!f) return;
     pthread_mutex_lock(&s_peq_mutex);
+    fprintf(f, "peq_preset=%s\n", s_peq_active_preset);
     fprintf(f, "peq_preamp=%.2f\n", s_preamp_db);
     for (int i = 0; i < PEQ_MAX_BANDS; i++) {
         fprintf(f, "peq_b%d=%d,%d,%.1f,%.2f,%.2f\n",
@@ -538,7 +571,10 @@ void peq_save_state(void *file_ptr) {
 void peq_load_state_key(const char *key, const char *val) {
     if (!key || !val) return;
     pthread_mutex_lock(&s_peq_mutex);
-    if (strcmp(key, "peq_preamp") == 0) {
+    if (strcmp(key, "peq_preset") == 0) {
+        strncpy(s_peq_active_preset, val, sizeof(s_peq_active_preset) - 1);
+        s_peq_active_preset[sizeof(s_peq_active_preset) - 1] = '\0';
+    } else if (strcmp(key, "peq_preamp") == 0) {
         s_preamp_db = (float)atof(val);
     } else if (strncmp(key, "peq_b", 5) == 0) {
         int idx = atoi(key + 5);

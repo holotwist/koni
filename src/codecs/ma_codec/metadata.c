@@ -107,33 +107,6 @@ static char* decode_id3_string(const uint8_t* data, size_t size, uint8_t encodin
     return strdup("");
 }
 
-static char* save_temp_cover(const uint8_t* data, size_t size) {
-    char tmpl[] = "/tmp/koni_cover_XXXXXX";
-    int fd = mkstemp(tmpl);
-    if (fd < 0) return NULL;
-    
-    size_t written = 0;
-    while (written < size) {
-        ssize_t res = write(fd, data + written, size - written);
-        if (res < 0) break;
-        written += res;
-    }
-    close(fd);
-    
-    const char* ext = ".jpg";
-    if (size >= 4 && data[0] == 0x89 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G') {
-        ext = ".png";
-    }
-    
-    char* url = malloc(256);
-    char new_path[256];
-    snprintf(new_path, sizeof(new_path), "%s%s", tmpl, ext);
-    rename(tmpl, new_path);
-    
-    snprintf(url, 256, "file://%s", new_path);
-    return url;
-}
-
 static void parse_id3v2(FILE* fp, uint8_t magic[4], KoniMetadata* meta) {
     uint8_t header[6];
     if (fread(header, 1, 6, fp) != 6) return;
@@ -245,7 +218,7 @@ static void parse_id3v2(FILE* fp, uint8_t magic[4], KoniMetadata* meta) {
                     }
                 }
                 if (img_offset > 0 && img_offset < frame_size) {
-                    meta->art_url = save_temp_cover(frame_data + img_offset, frame_size - img_offset);
+                    meta->art_url = koni_codec_save_temp_art(frame_data + img_offset, frame_size - img_offset, NULL);
                 }
             }
         }
@@ -269,7 +242,7 @@ static void parse_flac_picture(const uint8_t* blk, size_t size, KoniMetadata* me
         uint32_t plen = read_u32_be(blk + p);
         p += 4;
         if (p + plen <= size && plen > 0) {
-            meta->art_url = save_temp_cover(blk + p, plen);
+            meta->art_url = koni_codec_save_temp_art(blk + p, plen, NULL);
         }
     }
 }
@@ -327,7 +300,7 @@ static void parse_vorbis_comments(const uint8_t* blk, size_t size, KoniMetadata*
                 uint8_t* pic = base64_decode(val, strlen(val), &dec_sz);
                 if (pic) {
                     if (dec_sz > 4) {
-                        meta->art_url = save_temp_cover(pic, dec_sz);
+                        meta->art_url = koni_codec_save_temp_art(pic, dec_sz, NULL);
                     }
                     free(pic);
                 }

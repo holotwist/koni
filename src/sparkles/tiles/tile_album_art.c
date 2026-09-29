@@ -5,9 +5,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+#endif
+
 #define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
 #include "third_party/stb_image.h"
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 static Texture2D s_cover_texture = {0};
 static char s_cached_filepath[1024] = {0};

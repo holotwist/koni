@@ -1,7 +1,9 @@
 #ifndef UI_COMMON_H
 #define UI_COMMON_H
 
+#if !defined(__ANDROID__) && !defined(PLATFORM_ANDROID)
 #include <ncurses.h>
+#endif
 #include <stdint.h>
 #include "state.h"
 #include "codec.h"

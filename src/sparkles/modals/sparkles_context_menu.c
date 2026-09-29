@@ -5,27 +5,31 @@
 #include "state.h"
 #include "playlist_manager.h"
 #include "sparkles_text_prompt.h"
+#include "input/sparkles_input.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h>
 
 typedef enum {
     CMENU_TRACK = 0,
     CMENU_PLAYLIST
 } ContextMenuMode;
 
+typedef enum {
+    CMENU_PAGE_ACTIONS = 0,
+    CMENU_PAGE_PLAYLISTS
+} ContextMenuPage;
+
 static ContextMenuMode s_cmenu_mode = CMENU_TRACK;
+static ContextMenuPage s_cmenu_page = CMENU_PAGE_ACTIONS;
 static bool s_menu_open = false;
 static bool s_just_opened = false;
 static Rectangle s_menu_rect = {0};
 static SparklesTrackItem s_track = {0};
 static char s_target_playlist[128] = {0};
-static int s_hovered_idx = -1;
-static bool s_show_subplaylists = false;
-static int s_sub_hovered_idx = -1;
-
-#define MENU_WIDTH 210.0f
-#define ITEM_HEIGHT 28.0f
+static float s_pl_scroll = 0.0f;
+static Vector2 s_open_pos = {0};
 
 static void queue_play_next(const SparklesTrackItem *item) {
     pthread_mutex_lock(&state_mutex);
@@ -50,65 +54,6 @@ static void queue_play_next(const SparklesTrackItem *item) {
     playlist[insert_pos].metadata_loaded = true;
     num_playlist_files++;
     pthread_mutex_unlock(&state_mutex);
-}
-
-static void play_entire_playlist(const char *name) {
-    LoadedPlaylist lp;
-    if (!playlist_mgmt_load_playlist(name, &lp) || lp.count == 0) return;
-
-    pthread_mutex_lock(&state_mutex);
-    if (active_playlist_playback.paths) {
-        for (int i = 0; i < active_playlist_playback.count; i++) {
-            free(active_playlist_playback.paths[i]);
-            free(active_playlist_playback.titles[i]);
-        }
-        free(active_playlist_playback.paths);
-        free(active_playlist_playback.titles);
-    }
-
-    active_playlist_playback.count = lp.count;
-    active_playlist_playback.paths = malloc(sizeof(char*) * lp.count);
-    active_playlist_playback.titles = malloc(sizeof(char*) * lp.count);
-    for (int i = 0; i < lp.count; i++) {
-        active_playlist_playback.paths[i] = strdup(lp.items[i].path);
-        active_playlist_playback.titles[i] = strdup(lp.items[i].title[0] ? lp.items[i].title : lp.items[i].path);
-    }
-    strncpy(active_playlist_playback.name, name, sizeof(active_playlist_playback.name) - 1);
-    current_play_source = SOURCE_PLAYLIST;
-    playing_file_idx = 0;
-    strncpy(playing_filepath, lp.items[0].path, sizeof(playing_filepath) - 1);
-    strncpy(playing_filename, lp.items[0].title[0] ? lp.items[0].title : lp.items[0].path, 255);
-    pthread_mutex_unlock(&state_mutex);
-
-    atomic_store(&seek_target_ms, -1);
-    atomic_store(&current_cmd_atomic, CMD_PLAY);
-    playlist_mgmt_free_loaded(&lp);
-}
-
-static void queue_add_all_from_playlist(const char *name) {
-    LoadedPlaylist lp;
-    if (!playlist_mgmt_load_playlist(name, &lp) || lp.count == 0) return;
-
-    pthread_mutex_lock(&state_mutex);
-    for (int i = 0; i < lp.count; i++) {
-        if (num_playlist_files >= playlist_capacity) {
-            playlist_capacity = playlist_capacity == 0 ? 1024 : playlist_capacity * 2;
-            playlist = realloc(playlist, sizeof(PlaylistEntry) * playlist_capacity);
-        }
-        int idx = num_playlist_files;
-        strncpy(playlist[idx].path, lp.items[i].path, sizeof(playlist[idx].path) - 1);
-        const char *t = lp.items[i].title[0] ? lp.items[i].title : lp.items[i].path;
-        const char *slash = strrchr(t, '/');
-        strncpy(playlist[idx].name, slash ? slash + 1 : t, 255);
-        playlist[idx].display_width = MeasureSparklesText(playlist[idx].name, FONT_SIZE_SM);
-        memset(&playlist[idx].meta, 0, sizeof(KoniMetadata));
-        playlist[idx].meta.title = strdup(t);
-        playlist[idx].duration_sec = lp.items[i].duration_sec;
-        playlist[idx].metadata_loaded = true;
-        num_playlist_files++;
-    }
-    pthread_mutex_unlock(&state_mutex);
-    playlist_mgmt_free_loaded(&lp);
 }
 
 static void queue_add_tail(const SparklesTrackItem *item) {
@@ -143,61 +88,78 @@ static void on_new_playlist_submitted(const char *name, void *ud) {
 
 void sparkles_context_menu_init(void) {
     s_menu_open = false;
-    s_show_subplaylists = false;
+    s_cmenu_page = CMENU_PAGE_ACTIONS;
+    s_pl_scroll = 0.0f;
+}
+
+static void calculate_menu_layout(void) {
+    float sw = (float)GetScreenWidth();
+    float sh = (float)GetScreenHeight();
+    float ui_scale = sparkles_get_ui_scale();
+    bool is_mobile = (sh > sw) || (sw < 600.0f);
+
+    int item_count = 0;
+    if (s_cmenu_page == CMENU_PAGE_PLAYLISTS) {
+        item_count = 6;
+    } else if (s_cmenu_mode == CMENU_PLAYLIST) {
+        item_count = (strcasecmp(s_target_playlist, "Favourites") == 0) ? 2 : 3;
+    } else {
+        item_count = s_track.in_playlist ? 5 : 4;
+    }
+
+    if (is_mobile) {
+        float item_h = fmaxf(48.0f, 44.0f * ui_scale);
+        float header_h = 44.0f * ui_scale;
+        float cancel_h = item_h;
+        float total_h = header_h + (item_count * item_h) + cancel_h + (16.0f * ui_scale);
+        if (total_h > sh - 40.0f) total_h = sh - 40.0f;
+
+        float menu_w = fminf(sw - 28.0f * ui_scale, 440.0f * ui_scale);
+        float x = (sw - menu_w) * 0.5f;
+        float y = (sh - total_h) * 0.5f;
+        s_menu_rect = (Rectangle){ x, y, menu_w, total_h };
+    } else {
+        float item_h = fmaxf(32.0f, 28.0f * ui_scale);
+        float menu_w = fmaxf(240.0f, 220.0f * ui_scale);
+        float total_h = (item_count * item_h) + (18.0f * ui_scale);
+
+        float x = s_open_pos.x;
+        float y = s_open_pos.y;
+        if (x + menu_w > sw - 12.0f) x = sw - menu_w - 12.0f;
+        if (y + total_h > sh - 12.0f) y = sh - total_h - 12.0f;
+        if (x < 12.0f) x = 12.0f;
+        if (y < 12.0f) y = 12.0f;
+        s_menu_rect = (Rectangle){ x, y, menu_w, total_h };
+    }
 }
 
 void sparkles_context_menu_open(Vector2 mouse_pos, const SparklesTrackItem *track) {
     if (!track) return;
     s_cmenu_mode = CMENU_TRACK;
+    s_cmenu_page = CMENU_PAGE_ACTIONS;
     s_track = *track;
+    s_open_pos = mouse_pos;
     s_menu_open = true;
     s_just_opened = true;
-    s_show_subplaylists = false;
-
-    float sw = (float)GetScreenWidth();
-    float sh = (float)GetScreenHeight();
-
-    int item_count = s_track.in_playlist ? 5 : 4;
-    float total_h = item_count * ITEM_HEIGHT + 16.0f;
-    float x = mouse_pos.x;
-    float y = mouse_pos.y;
-
-    if (x + MENU_WIDTH > sw - 10.0f) x = sw - MENU_WIDTH - 10.0f;
-    if (y + total_h > sh - 10.0f) y = sh - total_h - 10.0f;
-    if (x < 10.0f) x = 10.0f;
-    if (y < 10.0f) y = 10.0f;
-
-    s_menu_rect = (Rectangle){ x, y, MENU_WIDTH, total_h };
+    s_pl_scroll = 0.0f;
+    calculate_menu_layout();
 }
 
 void sparkles_context_menu_open_playlist(Vector2 mouse_pos, const char *playlist_name) {
     if (!playlist_name || !playlist_name[0]) return;
     s_cmenu_mode = CMENU_PLAYLIST;
+    s_cmenu_page = CMENU_PAGE_ACTIONS;
     strncpy(s_target_playlist, playlist_name, sizeof(s_target_playlist) - 1);
+    s_open_pos = mouse_pos;
     s_menu_open = true;
     s_just_opened = true;
-    s_show_subplaylists = false;
-
-    float sw = (float)GetScreenWidth();
-    float sh = (float)GetScreenHeight();
-
-    bool is_fav = (strcasecmp(s_target_playlist, "Favourites") == 0);
-    int item_count = is_fav ? 2 : 3;
-    float total_h = item_count * ITEM_HEIGHT + 16.0f;
-    float x = mouse_pos.x;
-    float y = mouse_pos.y;
-
-    if (x + MENU_WIDTH > sw - 10.0f) x = sw - MENU_WIDTH - 10.0f;
-    if (y + total_h > sh - 10.0f) y = sh - total_h - 10.0f;
-    if (x < 10.0f) x = 10.0f;
-    if (y < 10.0f) y = 10.0f;
-
-    s_menu_rect = (Rectangle){ x, y, MENU_WIDTH, total_h };
+    s_pl_scroll = 0.0f;
+    calculate_menu_layout();
 }
 
 void sparkles_context_menu_close(void) {
     s_menu_open = false;
-    s_show_subplaylists = false;
+    s_cmenu_page = CMENU_PAGE_ACTIONS;
 }
 
 bool sparkles_context_menu_is_open(void) {
@@ -205,95 +167,211 @@ bool sparkles_context_menu_is_open(void) {
 }
 
 bool sparkles_context_menu_update(void) {
-    Vector2 m = GetMousePosition();
     if (!s_menu_open) return false;
     if (s_just_opened) {
         s_just_opened = false;
-        return true; // Consume opening frame (avoid double triggering)
-    }
-    bool on_main = CheckCollisionPointRec(m, s_menu_rect);
-
-    int pl_count = playlist_mgmt_get_count();
-    float sub_w = 200.0f;
-    float sub_h = (float)(pl_count + 1) * ITEM_HEIGHT + 16.0f;
-    Rectangle sub_rect = { s_menu_rect.x + s_menu_rect.width, s_menu_rect.y + 3 * ITEM_HEIGHT, sub_w, sub_h };
-    if (sub_rect.x + sub_rect.width > (float)GetScreenWidth()) {
-        sub_rect.x = s_menu_rect.x - sub_w;
-    }
-    bool on_sub = s_show_subplaylists && CheckCollisionPointRec(m, sub_rect);
-
-    // Dismiss when left/right clicking outside menu
-    if ((IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) && !on_main && !on_sub) {
-        sparkles_context_menu_close();
-        return true; // Consumed click outside
+        sparkles_input_consume();
+        return true;
     }
 
     if (IsKeyPressed(KEY_ESCAPE)) {
+        if (s_cmenu_page == CMENU_PAGE_PLAYLISTS) {
+            s_cmenu_page = CMENU_PAGE_ACTIONS;
+            calculate_menu_layout();
+        } else {
+            sparkles_context_menu_close();
+        }
+        return true;
+    }
+
+    // Dismiss when tapped outside
+    if (sparkles_input_consume_tap_outside(s_menu_rect, NULL)) {
         sparkles_context_menu_close();
         return true;
     }
 
-    s_hovered_idx = -1;
-    int max_main_items = (s_cmenu_mode == CMENU_PLAYLIST)
-                         ? ((strcasecmp(s_target_playlist, "Favourites") == 0) ? 2 : 3)
-                         : (s_track.in_playlist ? 5 : 4);
+    return true;
+}
 
-    if (on_main) {
-        float rel_y = m.y - (s_menu_rect.y + 8.0f);
-        if (rel_y >= 0.0f) {
-            int idx = (int)(rel_y / ITEM_HEIGHT);
-            if (idx >= 0 && idx < max_main_items) {
-                s_hovered_idx = idx;
-                s_show_subplaylists = (s_cmenu_mode == CMENU_TRACK && idx == 3);
-            }
-        }
-    } else if (!on_sub) {
-        s_show_subplaylists = false;
+void sparkles_context_menu_render(float screen_w, float screen_h) {
+    if (!s_menu_open) return;
+
+    calculate_menu_layout();
+    float ui_scale = sparkles_get_ui_scale();
+    bool is_mobile = (screen_h > screen_w) || (screen_w < 600.0f);
+    Vector2 mouse = GetMousePosition();
+
+    // Overlay on mobile
+    if (is_mobile) {
+        DrawRectangle(0, 0, (int)screen_w, (int)screen_h, ColorAlpha(BLACK, 0.65f));
     }
 
-    s_sub_hovered_idx = -1;
-    if (on_sub) {
-        float rel_y = m.y - (sub_rect.y + 8.0f);
-        if (rel_y >= 0.0f) {
-            int idx = (int)(rel_y / ITEM_HEIGHT);
-            if (idx >= 0 && idx <= pl_count) {
-                s_sub_hovered_idx = idx;
-            }
-        }
+    DrawRectangle((int)s_menu_rect.x + 4, (int)s_menu_rect.y + 4, (int)s_menu_rect.width, (int)s_menu_rect.height, (Color){ 0, 0, 0, 160 });
+    DrawRectangleRec(s_menu_rect, (Color){ 14, 15, 20, 252 });
+    DrawRectangleLinesEx(s_menu_rect, 1.2f, COLOR_ACCENT);
+    DrawNothingCornerBrackets(s_menu_rect, 8.0f * ui_scale, COLOR_ACCENT);
+
+    float item_h = is_mobile ? fmaxf(48.0f, 44.0f * ui_scale) : fmaxf(32.0f, 28.0f * ui_scale);
+    float pad_y = 10.0f * ui_scale;
+
+    // Header bar (mobile)
+    if (is_mobile) {
+        float header_h = 44.0f * ui_scale;
+        const char *head_txt = (s_cmenu_mode == CMENU_PLAYLIST) ? s_target_playlist : (s_track.title[0] ? s_track.title : s_track.path);
+        DrawRectangle((int)s_menu_rect.x, (int)s_menu_rect.y, (int)s_menu_rect.width, (int)header_h, (Color){ 10, 11, 14, 255 });
+        DrawLine((int)s_menu_rect.x, (int)(s_menu_rect.y + header_h), (int)(s_menu_rect.x + s_menu_rect.width), (int)(s_menu_rect.y + header_h), (Color){ 30, 32, 42, 255 });
+
+        Rectangle head_box = { s_menu_rect.x + 14.0f * ui_scale, s_menu_rect.y + 10.0f * ui_scale, s_menu_rect.width - 28.0f * ui_scale, header_h - 16.0f * ui_scale };
+        DrawTextMarquee(head_txt, head_box, (Rectangle){ 0, 0, 0, 0 }, FONT_SIZE_SM, COLOR_TEXT_PRIMARY, 25.0f);
+        pad_y = header_h + 8.0f * ui_scale;
     }
 
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    if (s_cmenu_page == CMENU_PAGE_ACTIONS) {
+        const char *items[5];
+        int num_items = 0;
+
         if (s_cmenu_mode == CMENU_PLAYLIST) {
-            if (s_hovered_idx == 0) { // Play Playlist
-                play_entire_playlist(s_target_playlist);
-                sparkles_context_menu_close();
-            } else if (s_hovered_idx == 1) { // Add to Queue
-                queue_add_all_from_playlist(s_target_playlist);
-                sparkles_context_menu_close();
-            } else if (s_hovered_idx == 2 && strcasecmp(s_target_playlist, "Favourites") != 0) { // Delete Playlist
-                playlist_mgmt_delete(s_target_playlist);
-                tile_playlists_refresh();
-                sparkles_context_menu_close();
+            items[num_items++] = ">  Play Playlist";
+            items[num_items++] = "+  Add to Queue";
+            if (strcasecmp(s_target_playlist, "Favourites") != 0) {
+                items[num_items++] = "✕  Delete Playlist";
             }
-            return true;
+        } else {
+            bool is_fav = playlist_mgmt_is_favourite(s_track.path);
+            items[num_items++] = ">  Play Next";
+            items[num_items++] = "+  Add to Queue";
+            items[num_items++] = is_fav ? "★  Remove from Favourites" : "☆  Add to Favourites";
+            items[num_items++] = ">  Add to Playlist…";
+            if (s_track.in_playlist) {
+                items[num_items++] = "X  Remove from Playlist";
+            }
         }
 
-        if (s_hovered_idx == 0) { // Play Next
-            queue_play_next(&s_track);
+        for (int i = 0; i < num_items; i++) {
+            Rectangle item_r = { s_menu_rect.x + 6.0f * ui_scale, s_menu_rect.y + pad_y + i * item_h, s_menu_rect.width - 12.0f * ui_scale, item_h };
+            bool hover = CheckCollisionPointRec(mouse, item_r);
+
+            if (hover) {
+                DrawRectangleRec(item_r, ColorAlpha(COLOR_ACCENT, 0.18f));
+                DrawRectangle((int)item_r.x, (int)item_r.y + 3, 3, (int)item_r.height - 6, COLOR_ACCENT);
+            }
+
+            int text_y = (int)(item_r.y + (item_h - FONT_SIZE_SM) * 0.5f);
+            DrawText(items[i], (int)(item_r.x + 14.0f * ui_scale), text_y, FONT_SIZE_SM, hover ? COLOR_TEXT_PRIMARY : COLOR_TEXT_MUTED);
+
+            if (sparkles_input_consume_tap(item_r, NULL)) {
+                if (s_cmenu_mode == CMENU_PLAYLIST) {
+                    LoadedPlaylist lp;
+                    if (playlist_mgmt_load_playlist(s_target_playlist, &lp) && lp.count > 0) {
+                        if (i == 0) {
+                            pthread_mutex_lock(&state_mutex);
+                            if (active_playlist_playback.paths) {
+                                for (int k = 0; k < active_playlist_playback.count; k++) {
+                                    free(active_playlist_playback.paths[k]);
+                                    free(active_playlist_playback.titles[k]);
+                                }
+                                free(active_playlist_playback.paths);
+                                free(active_playlist_playback.titles);
+                            }
+                            active_playlist_playback.count = lp.count;
+                            active_playlist_playback.paths = malloc(sizeof(char*) * lp.count);
+                            active_playlist_playback.titles = malloc(sizeof(char*) * lp.count);
+                            for (int k = 0; k < lp.count; k++) {
+                                active_playlist_playback.paths[k] = strdup(lp.items[k].path);
+                                active_playlist_playback.titles[k] = strdup(lp.items[k].title[0] ? lp.items[k].title : lp.items[k].path);
+                            }
+                            strncpy(active_playlist_playback.name, s_target_playlist, sizeof(active_playlist_playback.name) - 1);
+                            current_play_source = SOURCE_PLAYLIST;
+                            playing_file_idx = 0;
+                            strncpy(playing_filepath, lp.items[0].path, sizeof(playing_filepath) - 1);
+                            strncpy(playing_filename, lp.items[0].title[0] ? lp.items[0].title : lp.items[0].path, 255);
+                            pthread_mutex_unlock(&state_mutex);
+
+                            atomic_store(&seek_target_ms, -1);
+                            atomic_store(&current_cmd_atomic, CMD_PLAY);
+                        } else if (i == 1) {
+                            pthread_mutex_lock(&state_mutex);
+                            for (int k = 0; k < lp.count; k++) {
+                                if (num_playlist_files >= playlist_capacity) {
+                                    playlist_capacity = playlist_capacity == 0 ? 1024 : playlist_capacity * 2;
+                                    playlist = realloc(playlist, sizeof(PlaylistEntry) * playlist_capacity);
+                                }
+                                int qi = num_playlist_files++;
+                                strncpy(playlist[qi].path, lp.items[k].path, sizeof(playlist[qi].path) - 1);
+                                strncpy(playlist[qi].name, lp.items[k].title[0] ? lp.items[k].title : lp.items[k].path, 255);
+                                playlist[qi].display_width = MeasureSparklesText(playlist[qi].name, FONT_SIZE_SM);
+                                memset(&playlist[qi].meta, 0, sizeof(KoniMetadata));
+                                playlist[qi].duration_sec = lp.items[k].duration_sec;
+                            }
+                            pthread_mutex_unlock(&state_mutex);
+                        }
+                        playlist_mgmt_free_loaded(&lp);
+                    }
+                    if (i == 2 && strcasecmp(s_target_playlist, "Favourites") != 0) {
+                        playlist_mgmt_delete(s_target_playlist);
+                        tile_playlists_refresh();
+                    }
+                    sparkles_context_menu_close();
+                    return;
+                }
+
+                if (i == 0) {
+                    queue_play_next(&s_track);
+                    sparkles_context_menu_close();
+                } else if (i == 1) {
+                    queue_add_tail(&s_track);
+                    sparkles_context_menu_close();
+                } else if (i == 2) {
+                    playlist_mgmt_toggle_favourite(s_track.path, s_track.title, s_track.artist, s_track.duration_sec);
+                    tile_playlists_refresh();
+                    sparkles_context_menu_close();
+                } else if (i == 3) {
+                    s_cmenu_page = CMENU_PAGE_PLAYLISTS;
+                    s_pl_scroll = 0.0f;
+                    calculate_menu_layout();
+                } else if (i == 4 && s_track.in_playlist) {
+                    playlist_mgmt_remove_track(s_track.playlist_name, s_track.playlist_track_idx);
+                    tile_playlists_refresh();
+                    sparkles_context_menu_close();
+                }
+            }
+        }
+
+        if (is_mobile) {
+            float cancel_y = s_menu_rect.y + pad_y + (num_items * item_h) + 4.0f * ui_scale;
+            Rectangle cancel_r = { s_menu_rect.x + 6.0f * ui_scale, cancel_y, s_menu_rect.width - 12.0f * ui_scale, item_h };
+            bool hover_can = CheckCollisionPointRec(mouse, cancel_r);
+            DrawRectangleRec(cancel_r, (Color){ 20, 22, 28, 255 });
+            DrawRectangleLinesEx(cancel_r, 1.0f, hover_can ? COLOR_ACCENT : (Color){ 34, 38, 48, 255 });
+            int tw_c = MeasureText("Cancel", FONT_SIZE_SM);
+            DrawText("Cancel", (int)(cancel_r.x + (cancel_r.width - tw_c) * 0.5f), (int)(cancel_r.y + (item_h - FONT_SIZE_SM) * 0.5f), FONT_SIZE_SM, hover_can ? COLOR_ACCENT : COLOR_TEXT_MUTED);
+
+            if (sparkles_input_consume_tap(cancel_r, NULL)) {
+                sparkles_context_menu_close();
+                return;
+            }
+        }
+    } else {
+        // Add To Playlist (2nd page)
+        Rectangle back_r = { s_menu_rect.x + 6.0f * ui_scale, s_menu_rect.y + pad_y, s_menu_rect.width - 12.0f * ui_scale, item_h };
+        bool hover_back = CheckCollisionPointRec(mouse, back_r);
+        DrawText("<  Back", (int)(back_r.x + 10.0f * ui_scale), (int)(back_r.y + (item_h - FONT_SIZE_SM) * 0.5f), FONT_SIZE_SM, hover_back ? WHITE : COLOR_ACCENT);
+
+        if (sparkles_input_consume_tap(back_r, NULL)) {
+            s_cmenu_page = CMENU_PAGE_ACTIONS;
+            calculate_menu_layout();
+            return;
+        }
+
+        float py = back_r.y + back_r.height + 4.0f * ui_scale;
+
+        Rectangle new_pl_r = { s_menu_rect.x + 6.0f * ui_scale, py, s_menu_rect.width - 12.0f * ui_scale, item_h };
+        bool hover_new = CheckCollisionPointRec(mouse, new_pl_r);
+        if (hover_new) DrawRectangleRec(new_pl_r, ColorAlpha(COLOR_ACCENT, 0.18f));
+        DrawText("+  [Create New Playlist]", (int)(new_pl_r.x + 14.0f * ui_scale), (int)(new_pl_r.y + (item_h - FONT_SIZE_SM) * 0.5f), FONT_SIZE_SM, hover_new ? COLOR_ACCENT : COLOR_TEXT_PRIMARY);
+
+        if (sparkles_input_consume_tap(new_pl_r, NULL)) {
             sparkles_context_menu_close();
-        } else if (s_hovered_idx == 1) { // Add to Queue
-            queue_add_tail(&s_track);
-            sparkles_context_menu_close();
-        } else if (s_hovered_idx == 2) { // Toggle Favourite
-            playlist_mgmt_toggle_favourite(s_track.path, s_track.title, s_track.artist, s_track.duration_sec);
-            tile_playlists_refresh();
-            sparkles_context_menu_close();
-        } else if (s_hovered_idx == 4 && s_track.in_playlist) { // Remove from Playlist
-            playlist_mgmt_remove_track(s_track.playlist_name, s_track.playlist_track_idx);
-            tile_playlists_refresh();
-            sparkles_context_menu_close();
-        } else if (s_sub_hovered_idx == 0) {
-            s_menu_open = false;
             sparkles_text_prompt_open(&(SparklesTextPromptConfig){
                 .tag = "NEW PLAYLIST",
                 .prompt = "New Playlist Name",
@@ -301,96 +379,52 @@ bool sparkles_context_menu_update(void) {
                 .max_len = 64,
                 .on_submit = on_new_playlist_submitted
             });
-            return true;
-        } else if (s_sub_hovered_idx > 0 && s_sub_hovered_idx <= pl_count) {
-            const PlaylistSummary *ps = playlist_mgmt_get_summary(s_sub_hovered_idx - 1);
-            if (ps) {
-                playlist_mgmt_add_track(ps->name, s_track.path, s_track.title, s_track.artist, s_track.duration_sec);
-                tile_playlists_refresh();
-            }
-            sparkles_context_menu_close();
-            return true;
-        }
-    }
-    return true;
-}
-
-void sparkles_context_menu_render(float screen_w, float screen_h) {
-    (void)screen_w; (void)screen_h;
-    if (!s_menu_open) return;
-
-    const char *items[5];
-    int num_items = 0;
-
-    if (s_cmenu_mode == CMENU_PLAYLIST) {
-        items[num_items++] = "Play Playlist";
-        items[num_items++] = "Add to Queue";
-        if (strcasecmp(s_target_playlist, "Favourites") != 0) {
-            items[num_items++] = "Delete Playlist";
-        }
-    } else {
-        bool is_fav = playlist_mgmt_is_favourite(s_track.path);
-        items[num_items++] = "Play Next";
-        items[num_items++] = "Add to Queue";
-        items[num_items++] = is_fav ? "Remove from Fav ★" : "Add to Fav ★";
-        items[num_items++] = "Add to Playlist >";
-        if (s_track.in_playlist) {
-            items[num_items++] = "Remove from Playlist";
-        }
-    }
-
-    // Backdrop shadow and panel
-    DrawRectangle((int)s_menu_rect.x + 3, (int)s_menu_rect.y + 3, (int)s_menu_rect.width, (int)s_menu_rect.height, (Color){ 0, 0, 0, 160 });
-    DrawRectangleRec(s_menu_rect, (Color){ 12, 13, 17, 250 });
-    DrawRectangleLinesEx(s_menu_rect, 1.0f, (Color){ 36, 40, 50, 255 });
-    DrawNothingCornerBrackets(s_menu_rect, 6.0f, COLOR_ACCENT);
-
-    for (int i = 0; i < num_items; i++) {
-        Rectangle item_r = { s_menu_rect.x + 4.0f, s_menu_rect.y + 8.0f + i * ITEM_HEIGHT, s_menu_rect.width - 8.0f, ITEM_HEIGHT };
-        bool hover = (s_hovered_idx == i);
-
-        if (hover) {
-            DrawRectangleRec(item_r, ColorAlpha(COLOR_ACCENT, 0.18f));
-            DrawRectangle((int)item_r.x, (int)item_r.y + 4, 2, (int)item_r.height - 8, COLOR_ACCENT);
+            return;
         }
 
-        DrawText(items[i], (int)item_r.x + 10, (int)item_r.y + 6, FONT_SIZE_SM, hover ? COLOR_TEXT_PRIMARY : COLOR_TEXT_MUTED);
-    }
+        py += item_h + 4.0f * ui_scale;
 
-    // Submenu for Playlists
-    if (s_show_subplaylists) {
         int pl_count = playlist_mgmt_get_count();
-        float sub_w = 200.0f;
-        float sub_h = (float)(pl_count + 1) * ITEM_HEIGHT + 16.0f;
+        float list_h = (s_menu_rect.y + s_menu_rect.height) - py - 8.0f * ui_scale;
+        Rectangle list_box = { s_menu_rect.x + 6.0f * ui_scale, py, s_menu_rect.width - 12.0f * ui_scale, list_h };
 
-        Rectangle sub_rect = { s_menu_rect.x + s_menu_rect.width, s_menu_rect.y + 3 * ITEM_HEIGHT, sub_w, sub_h };
-        if (sub_rect.x + sub_rect.width > (float)GetScreenWidth()) {
-            sub_rect.x = s_menu_rect.x - sub_w;
+        if (CheckCollisionPointRec(mouse, list_box)) {
+            float scr = sparkles_input_get_scroll_delta(list_box);
+            if (scr != 0.0f) s_pl_scroll += scr * item_h;
         }
+        float max_scr = fmaxf(0.0f, (float)pl_count * item_h - list_h);
+        if (s_pl_scroll < 0.0f) s_pl_scroll = 0.0f;
+        if (s_pl_scroll > max_scr) s_pl_scroll = max_scr;
 
-        DrawRectangle((int)sub_rect.x + 3, (int)sub_rect.y + 3, (int)sub_rect.width, (int)sub_rect.height, (Color){ 0, 0, 0, 160 });
-        DrawRectangleRec(sub_rect, (Color){ 12, 13, 17, 250 });
-        DrawRectangleLinesEx(sub_rect, 1.0f, (Color){ 36, 40, 50, 255 });
+        BeginScissorMode((int)list_box.x, (int)list_box.y, (int)list_box.width, (int)list_h);
 
-        // + [New Playlist]
-        Rectangle new_pl_r = { sub_rect.x + 4.0f, sub_rect.y + 8.0f, sub_rect.width - 8.0f, ITEM_HEIGHT };
-        bool hover_new = (s_sub_hovered_idx == 0);
-        if (hover_new) DrawRectangleRec(new_pl_r, ColorAlpha(COLOR_ACCENT, 0.18f));
-        DrawText("+ [New Playlist]", (int)new_pl_r.x + 8, (int)new_pl_r.y + 6, FONT_SIZE_SM, hover_new ? COLOR_ACCENT : COLOR_TEXT_PRIMARY);
-
-        // Existing playlists
         for (int i = 0; i < pl_count; i++) {
+            float row_y = py + i * item_h - s_pl_scroll;
+            if (row_y + item_h < py || row_y > py + list_h) continue;
+
             const PlaylistSummary *ps = playlist_mgmt_get_summary(i);
             if (!ps) continue;
 
-            Rectangle sub_item_r = { sub_rect.x + 4.0f, sub_rect.y + 8.0f + (i + 1) * ITEM_HEIGHT, sub_rect.width - 8.0f, ITEM_HEIGHT };
-            bool hover = (s_sub_hovered_idx == i + 1);
+            Rectangle row_r = { list_box.x, row_y, list_box.width, item_h };
+            bool hover = CheckCollisionPointRec(mouse, row_r);
+            if (hover) DrawRectangleRec(row_r, (Color){ 22, 25, 34, 255 });
 
-            if (hover) {
-                DrawRectangleRec(sub_item_r, ColorAlpha(COLOR_ACCENT, 0.18f));
+            DrawText(ps->name, (int)(row_r.x + 14.0f * ui_scale), (int)(row_r.y + (item_h - FONT_SIZE_SM) * 0.5f), FONT_SIZE_SM, hover ? COLOR_ACCENT : COLOR_TEXT_MUTED);
+
+            if (sparkles_input_consume_tap(row_r, NULL)) {
+                playlist_mgmt_add_track(ps->name, s_track.path, s_track.title, s_track.artist, s_track.duration_sec);
+                tile_playlists_refresh();
+                sparkles_context_menu_close();
+                break;
             }
-
-            DrawText(ps->name, (int)sub_item_r.x + 8, (int)sub_item_r.y + 6, FONT_SIZE_SM, hover ? COLOR_TEXT_PRIMARY : COLOR_TEXT_MUTED);
         }
+
+        EndScissorMode();
+    }
+
+    if (is_mobile) {
+        sparkles_input_block_area((Rectangle){ 0, 0, screen_w, screen_h });
+    } else {
+        sparkles_input_block_area(s_menu_rect);
     }
 }

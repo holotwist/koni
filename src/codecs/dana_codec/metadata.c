@@ -7,33 +7,6 @@
 #ifdef ENABLE_DANA
 #include "DANADecoder.h"
 
-static char* save_temp_cover(const uint8_t* data, size_t size) {
-    char tmpl[] = "/tmp/koni_cover_XXXXXX";
-    int fd = mkstemp(tmpl);
-    if (fd < 0) return NULL;
-    
-    size_t written = 0;
-    while (written < size) {
-        ssize_t res = write(fd, data + written, size - written);
-        if (res < 0) break;
-        written += res;
-    }
-    close(fd);
-    
-    const char* ext = ".jpg";
-    if (size >= 4 && data[0] == 0x89 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G') {
-        ext = ".png";
-    }
-    
-    char* url = malloc(256);
-    char new_path[256];
-    snprintf(new_path, sizeof(new_path), "%s%s", tmpl, ext);
-    rename(tmpl, new_path); 
-    
-    snprintf(url, 256, "file://%s", new_path);
-    return url;
-}
-
 bool dana_read_metadata(const char* filepath, KoniMetadata* meta, uint32_t* duration_sec) {
     memset(meta, 0, sizeof(KoniMetadata));
     if (duration_sec) *duration_sec = 0;
@@ -64,7 +37,7 @@ bool dana_read_metadata(const char* filepath, KoniMetadata* meta, uint32_t* dura
         if (header.metadata.lyrics) meta->lyrics = strdup((char*)header.metadata.lyrics);
         
         if (header.metadata.cover_data && header.metadata.cover_size > 0) {
-            meta->art_url = save_temp_cover(header.metadata.cover_data, header.metadata.cover_size);
+            meta->art_url = koni_codec_save_temp_art(header.metadata.cover_data, header.metadata.cover_size, NULL);
         }
         
         // for now Dana does not support ReplayGain metadata

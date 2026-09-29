@@ -1,6 +1,7 @@
 #include "state.h"
 #include "ui_common.h"
 #include "equalizer.h"
+#include "koni_paths.h"
 #include "krystal_engine.h"
 #include "listening_profile.h"
 
@@ -56,12 +57,14 @@ void library_reload(void) {
     num_library_tracks = db_load_all_tracks(&library_tracks, current_library_sort);
     if (selected_library_idx >= num_library_tracks) selected_library_idx = (num_library_tracks > 0) ? num_library_tracks - 1 : 0;
 
-    // Align library index with restored song if playing from library
-    if (playing_filepath[0] != '\0' && current_play_source == SOURCE_LIBRARY) {
+    // Align library index with restored song
+    if (playing_filepath[0] != '\0') {
         for (int i = 0; i < num_library_tracks; i++) {
             if (strcmp(library_tracks[i].path, playing_filepath) == 0) {
                 selected_library_idx = i;
-                playing_file_idx = i;
+                if (current_play_source == SOURCE_LIBRARY || current_play_source == SOURCE_NONE) {
+                    playing_file_idx = i;
+                }
                 break;
             }
         }
@@ -217,35 +220,13 @@ atomic_uint p_frames_consumed = 0;
 atomic_ullong p_hw_frames_played = 0;
 atomic_ullong p_track_hw_start = 0;
 
-// Create directory recursively if it doesn't exist
-static void ensure_config_dir(const char *path) {
-    char tmp[1024];
-    snprintf(tmp, sizeof(tmp), "%s", path);
-    char *p = NULL;
-    for (p = tmp + 1; *p; p++) {
-        if (*p == '/') {
-            *p = 0;
-            mkdir(tmp, 0755);
-            *p = '/';
-        }
-    }
-    mkdir(tmp, 0755);
-}
-
 static void get_state_path(char *buf, size_t size) {
-    const char *home = getenv("HOME");
-    if (home) {
-        snprintf(buf, size, "%s/.config/koni/state", home);
-    } else {
-        buf[0] = '\0';
-    }
+    koni_get_path(buf, size, "state");
 }
 
 static void load_playlist_queue(void) {
     char path[1024];
-    const char *home = getenv("HOME");
-    if (home) snprintf(path, sizeof(path), "%s/.config/koni/queue.m3u", home);
-    else return;
+    koni_get_path(path, sizeof(path), "queue.m3u");
 
     FILE *f = fopen(path, "r");
     if (!f) return;
@@ -274,9 +255,7 @@ static void load_playlist_queue(void) {
 
 static void save_playlist_queue(void) {
     char path[1024];
-    const char *home = getenv("HOME");
-    if (home) snprintf(path, sizeof(path), "%s/.config/koni/queue.m3u", home);
-    else return;
+    koni_get_path(path, sizeof(path), "queue.m3u");
 
     FILE *f = fopen(path, "w");
     if (!f) return;
@@ -328,7 +307,7 @@ void load_state(void) {
             else if (strcmp(key, "base_playing_idx") == 0) base_playing_idx = atoi(val);
             else if (strcmp(key, "active_playlist") == 0) strncpy(active_playlist_name, val, sizeof(active_playlist_name)-1);
             else if (strcmp(key, "play_pos_sec") == 0) saved_pos_sec = (uint32_t)atoi(val);
-            else if (strncmp(key, "eq_", 3) == 0) eq_load_state_key(key, val);
+            else if (strncmp(key, "eq_", 3) == 0 || strncmp(key, "peq_", 4) == 0) eq_load_state_key(key, val);
             else if (strncmp(key, "krystal_", 8) == 0) krystal_load_state_key(key, val);
         }
     }
@@ -370,12 +349,7 @@ void save_state(void) {
     get_state_path(path, sizeof(path));
     if (path[0] == '\0') return;
 
-    char dir_path[1024];
-    const char *home = getenv("HOME");
-    if (home) {
-        snprintf(dir_path, sizeof(dir_path), "%s/.config/koni/", home);
-        ensure_config_dir(dir_path);
-    }
+    koni_ensure_dir(koni_get_base_dir());
 
     FILE *f = fopen(path, "w");
     if (!f) return;

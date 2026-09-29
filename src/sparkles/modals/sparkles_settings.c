@@ -8,6 +8,7 @@
 #include "state.h"
 #include "listening_profile.h"
 #include "sparkles_text_prompt.h"
+#include "input/sparkles_input.h"
 #include "rlgl.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -97,8 +98,8 @@ void sparkles_settings_update(float screen_w, float screen_h) {
 
 static bool DrawBtn(Rectangle bounds, const char *text, bool active) {
     Vector2 m = GetMousePosition();
-    bool hover = CheckCollisionPointRec(m, bounds);
-    bool clicked = hover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+    bool hover = !sparkles_input_is_consumed() && CheckCollisionPointRec(m, bounds);
+    bool clicked = hover && sparkles_input_consume_tap(bounds, NULL);
 
     Color bg = active ? ColorAlpha(COLOR_ACCENT, 0.18f) : (hover ? (Color){18, 19, 23, 255} : (Color){0, 0, 0, 0});
     Color fg = active ? COLOR_ACCENT : (hover ? COLOR_TEXT_PRIMARY : COLOR_TEXT_MUTED);
@@ -115,12 +116,12 @@ static bool DrawBtn(Rectangle bounds, const char *text, bool active) {
 
 static bool DrawToggle(Rectangle bounds, const char *label, bool *val) {
     Vector2 mouse = GetMousePosition();
-    bool hover = CheckCollisionPointRec(mouse, bounds);
+    bool hover = !sparkles_input_is_consumed() && CheckCollisionPointRec(mouse, bounds);
 
     DrawText(label, (int)bounds.x + 12, (int)bounds.y + (int)(bounds.height - 14) / 2, FONT_SIZE_SM, hover ? COLOR_TEXT_PRIMARY : COLOR_TEXT_MUTED);
 
     Rectangle btn = { bounds.x + bounds.width - 76, bounds.y + (bounds.height - 22) / 2, 64, 22 };
-    bool clicked = CheckCollisionPointRec(mouse, btn) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+    bool clicked = sparkles_input_consume_tap(btn, NULL);
     if (clicked) *val = !(*val);
 
     Color st_col = *val ? COLOR_ACCENT : (Color){ 30, 32, 38, 255 };
@@ -144,12 +145,15 @@ bool sparkles_settings_handle_input(float screen_w, float screen_h) {
     float box_h = fminf(540.0f, screen_h - 60.0f);
     Rectangle box = { (screen_w - box_w) * 0.5f, (screen_h - box_h) * 0.5f, box_w, box_h };
 
-    Vector2 mouse = GetMousePosition();
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !CheckCollisionPointRec(mouse, box)) {
-        sparkles_settings_close();
-        return true;
+    Vector2 tap;
+    if (sparkles_input_consume_tap((Rectangle){ 0, 0, screen_w, screen_h }, &tap)) {
+        if (!CheckCollisionPointRec(tap, box)) {
+            sparkles_settings_close();
+            return true;
+        }
     }
 
+    sparkles_input_block_area(box);
     return true;
 }
 

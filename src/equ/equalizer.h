@@ -15,6 +15,7 @@ typedef enum {
 
 typedef struct {
     const char *name;
+    float preamp_db;
     float gains[EQ_NUM_BANDS];
 } EQPreset;
 

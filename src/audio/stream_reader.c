@@ -108,6 +108,7 @@ void stream_reader_apply_to_global_state(const AudioStream *stream) {
     atomic_store(&header_ready_for_idx, stream->file_idx);
     atomic_fetch_add(&current_track_id, 1);
     force_redraw = true;
+    save_state();
 }
 
 uint32_t stream_reader_decode(AudioStream *stream, int32_t *pcm_out, uint32_t max_frames) {

@@ -34,7 +34,8 @@ static void update_filtered_list(void) {
     pthread_mutex_lock(&state_mutex);
     s_filtered_count = 0;
     int total = num_library_tracks;
-    for (int i = 0; i < total; i++) {
+    int max_cap = (int)(sizeof(s_filtered) / sizeof(s_filtered[0]));
+    for (int i = 0; i < total && s_filtered_count < max_cap; i++) {
         if (s_search_len == 0 ||
             str_contains_ci(library_tracks[i].title, s_search_buf) ||
             str_contains_ci(library_tracks[i].artist, s_search_buf) ||
@@ -67,6 +68,7 @@ void sparkles_radial_list_open(void) {
     s_just_opened = true;
     s_search_buf[0] = '\0';
     s_search_len = 0;
+    sparkles_input_set_text_focused(true);
     update_filtered_list();
 
     // Center scroll on currently playing song if found
@@ -88,6 +90,7 @@ void sparkles_radial_list_close(void) {
     s_open = false;
     s_search_buf[0] = '\0';
     s_search_len = 0;
+    sparkles_input_set_text_focused(false);
 }
 
 void sparkles_radial_list_toggle(void) {
@@ -116,10 +119,12 @@ void sparkles_radial_list_update(float screen_w, float screen_h) {
     s_scroll_idx += (s_target_scroll - s_scroll_idx) * fminf(1.0f, dt * 14.0f);
 }
 
-// Computes right-edge circle geometry passing through (W, 0) and (W, H)
+// Computes right-edge circle geometry passing through (W, 0) and (W, H) with density scaling
 static void get_arc_geometry(float W, float H, float *out_cx, float *out_cy, float *out_R, float *out_alpha_max, float *out_w_arc) {
-    float W_arc = fminf(460.0f, W * 0.40f);
-    if (W_arc < 300.0f) W_arc = 300.0f;
+    bool is_vertical = (H > W);
+    float ui_scale = sparkles_get_ui_scale();
+    float W_arc = is_vertical ? fminf(W * 0.85f, 320.0f * ui_scale) : fminf(W * 0.45f, 460.0f * ui_scale);
+    if (W_arc < 240.0f * ui_scale) W_arc = 240.0f * ui_scale;
 
     float H_half = H * 0.5f;
     float d = (H_half * H_half - W_arc * W_arc) / (2.0f * W_arc);
@@ -135,10 +140,20 @@ static void get_arc_geometry(float W, float H, float *out_cx, float *out_cy, flo
 bool sparkles_radial_list_handle_input(float screen_w, float screen_h) {
     if (!s_open) return false;
 
-    // Consume the opening frame (de-bouncing)
     if (s_just_opened) {
         s_just_opened = false;
         return true;
+    }
+
+    const SparklesPointerState *ptr = sparkles_input_get_state();
+    if (ptr->just_released && ptr->is_dragging) {
+        float dx = ptr->pos.x - ptr->down_pos.x;
+        float dy = ptr->pos.y - ptr->down_pos.y;
+        if (dx > 40.0f && fabsf(dx) > fabsf(dy) * 1.2f) {
+            sparkles_radial_list_close();
+            sparkles_input_consume();
+            return true;
+        }
     }
 
     // Do not process input while context menu is active
@@ -150,7 +165,6 @@ bool sparkles_radial_list_handle_input(float screen_w, float screen_h) {
         return true;
     }
 
-    Vector2 mouse = GetMousePosition();
     float cx, cy, R, alpha_max, W_arc;
     get_arc_geometry(screen_w, screen_h, &cx, &cy, &R, &alpha_max, &W_arc);
 
@@ -238,13 +252,35 @@ bool sparkles_radial_list_handle_input(float screen_w, float screen_h) {
     // Tap or left-click
     Vector2 tap;
     if (sparkles_input_consume_tap((Rectangle){ 0, 0, screen_w, screen_h }, &tap)) {
-        if (s_hovered_filtered_idx >= 0 && s_hovered_filtered_idx < s_filtered_count) {
-            int target = s_filtered[s_hovered_filtered_idx];
-            pthread_mutex_lock(&state_mutex);
-            selected_library_idx = target;
-            strncpy(playing_filepath, library_tracks[target].path, sizeof(playing_filepath) - 1);
-            strncpy(playing_filename, library_tracks[target].name, 255);
-            playing_file_idx = target;
+        int clicked_item = -1;
+        float ui_scale = sparkles_get_ui_scale();
+        bool is_vertical = (screen_h > screen_w);
+        float delta_alpha = is_vertical ? 0.240f : 0.140f;
+
+        pthread_mutex_lock(&state_mutex);
+        for (int i = 0; i < s_filtered_count; i++) {
+            float rel = (float)i - s_scroll_idx;
+            float a = rel * delta_alpha;
+            if (a < -alpha_max - 0.05f || a > alpha_max + 0.05f) continue;
+
+            float item_x = cx - R * cosf(a);
+            float item_y = cy + R * sinf(a);
+            float row_w = screen_w - item_x;
+            if (row_w < 140.0f * ui_scale) row_w = 140.0f * ui_scale;
+            float hit_h = fmaxf(48.0f, 40.0f * ui_scale);
+            Rectangle hit_box = { item_x - (16.0f * ui_scale), item_y - (hit_h * 0.5f), row_w, hit_h };
+
+            if (CheckCollisionPointRec(tap, hit_box)) {
+                clicked_item = s_filtered[i];
+                break;
+            }
+        }
+
+        if (clicked_item >= 0) {
+            selected_library_idx = clicked_item;
+            strncpy(playing_filepath, library_tracks[clicked_item].path, sizeof(playing_filepath) - 1);
+            strncpy(playing_filename, library_tracks[clicked_item].name, 255);
+            playing_file_idx = clicked_item;
             current_play_source = SOURCE_LIBRARY;
             pthread_mutex_unlock(&state_mutex);
 
@@ -252,12 +288,16 @@ bool sparkles_radial_list_handle_input(float screen_w, float screen_h) {
             atomic_store(&current_cmd_atomic, CMD_PLAY);
             sparkles_radial_list_close();
             return true;
-        } else if (tap.x < (screen_w - W_arc - 40.0f)) {
+        }
+        pthread_mutex_unlock(&state_mutex);
+
+        if (tap.x < (screen_w - W_arc - 40.0f)) {
             sparkles_radial_list_close();
             return true;
         }
     }
 
+    sparkles_input_block_area(full_screen);
     return true;
 }
 
@@ -304,7 +344,8 @@ void sparkles_radial_list_render(float screen_w, float screen_h) {
 
     // Render items
     s_hovered_filtered_idx = -1;
-    float delta_alpha = 0.140f; // ~8 degrees step between songs
+    bool is_vertical = (screen_h > screen_w);
+    float delta_alpha = is_vertical ? 0.240f : 0.140f;
 
     pthread_mutex_lock(&state_mutex);
 
@@ -326,34 +367,36 @@ void sparkles_radial_list_render(float screen_w, float screen_h) {
         const char *artist = library_tracks[track_idx].artist[0] ? library_tracks[track_idx].artist : "Unknown";
         uint32_t dur = library_tracks[track_idx].duration_sec;
 
+        float ui_scale = sparkles_get_ui_scale();
         float row_w = screen_w - item_x;
-        if (row_w < 120.0f) row_w = 120.0f;
+        if (row_w < 140.0f * ui_scale) row_w = 140.0f * ui_scale;
 
-        Rectangle hit_box = { item_x - 10.0f, item_y - 14.0f, row_w, 28.0f };
+        float hit_h = fmaxf(48.0f, 40.0f * ui_scale);
+        Rectangle hit_box = { item_x - (16.0f * ui_scale), item_y - (hit_h * 0.5f), row_w, hit_h };
         bool is_hover = !sparkles_context_menu_is_open() && CheckCollisionPointRec(mouse, hit_box);
         if (is_hover) s_hovered_filtered_idx = i;
 
-        // Radial pip on the arc rail
+        // Radial pip on arc rail
+        float base_pip_r = 4.0f * ui_scale;
         Color pip_col = is_playing ? COLOR_ACCENT : (is_hover ? WHITE : ColorAlpha(COLOR_TEXT_MUTED, 0.7f));
-        DrawCircleV((Vector2){ item_x, item_y }, is_hover ? 4.0f : (is_playing ? 3.5f : 2.5f), pip_col);
+        DrawCircleV((Vector2){ item_x, item_y }, is_hover ? (base_pip_r + 2.0f) : (is_playing ? (base_pip_r + 1.5f) : base_pip_r), pip_col);
         if (is_hover || is_playing) {
-            DrawLineEx((Vector2){ item_x, item_y }, (Vector2){ item_x + 12.0f, item_y }, 1.5f, pip_col);
+            DrawLineEx((Vector2){ item_x, item_y }, (Vector2){ item_x + (20.0f * ui_scale), item_y }, 2.0f, pip_col);
         }
 
-        // Show duration only on 9 centered items (center ±4) or hovered item
-        bool show_dur = (fabsf(rel) <= 4.5f) || is_hover;
-        float dur_w = show_dur ? 40.0f : 0.0f;
+        bool show_dur = (fabsf(rel) <= 3.5f) || is_hover;
+        float dur_w = show_dur ? (48.0f * ui_scale) : 0.0f;
 
-        // Song label layout (unconstrained tracks gain extra title width)
-        float text_start_x = item_x + (is_hover ? 18.0f : 14.0f);
-        float avail_title_w = screen_w - text_start_x - dur_w - 20.0f;
-        if (avail_title_w < 60.0f) avail_title_w = 60.0f;
+        float text_start_x = item_x + (24.0f * ui_scale);
+        float avail_title_w = screen_w - text_start_x - dur_w - (16.0f * ui_scale);
+        if (avail_title_w < 80.0f) avail_title_w = 80.0f;
 
-        Rectangle title_box = { text_start_x, item_y - 8.0f, avail_title_w, (float)FONT_SIZE_SM };
+        int font_sz = FONT_SIZE_MD;
+        Rectangle title_box = { text_start_x, item_y - ((float)font_sz * 0.5f), avail_title_w, (float)font_sz * 1.3f };
         Color title_col = is_playing ? COLOR_ACCENT : (is_hover ? COLOR_TEXT_PRIMARY : ColorAlpha(COLOR_TEXT_PRIMARY, 0.75f));
 
         const char *display_line = TextFormat("%s  ·  %s", title, artist);
-        DrawTextMarquee(display_line, title_box, (Rectangle){ 0, 0, screen_w, screen_h }, FONT_SIZE_SM, title_col, 25.0f);
+        DrawTextMarquee(display_line, title_box, (Rectangle){ 0, 0, screen_w, screen_h }, font_sz, title_col, 25.0f);
 
         // Right-aligned duration for focused tracks
         if (show_dur) {

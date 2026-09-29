@@ -214,6 +214,7 @@ if(DBUS_FOUND)
 endif()
 
 add_library(koni_core OBJECT
+    src/utils/koni_paths.c
     src/utils/state.c
     src/utils/file_list.c
     src/utils/vis_math.c

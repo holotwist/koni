@@ -1,4 +1,5 @@
 #include "sparkles_widgets.h"
+#include "input/sparkles_input.h"
 #include "state.h"
 #include <math.h>
 
@@ -32,8 +33,20 @@ void tile_waveform_render(SparklesTile *tile, Rectangle b) {
 
 void widget_waveform_input(SparklesTile *tile, Rectangle b) {
     (void)tile;
+    if (sparkles_input_is_consumed()) return;
+
     Vector2 m = GetMousePosition();
-    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, b)) {
+    static bool s_scrubbing = false;
+
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(m, b)) {
+        s_scrubbing = true;
+    }
+    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+        s_scrubbing = false;
+    }
+
+    if (s_scrubbing && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        sparkles_input_consume();
         float pct = (m.x - (b.x + 18)) / (b.width - 36);
         if (pct < 0.0f) pct = 0.0f;
         if (pct > 1.0f) pct = 1.0f;

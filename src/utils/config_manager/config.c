@@ -9,6 +9,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <pthread.h>
 
 KoniConfig app_config = {0};
 
@@ -326,13 +327,18 @@ void config_init(void) {
         closedir(dir);
     }
 
-    // If no directories were defined in INI configs, register the default ~/Music
+    // If no directories were defined in INI configs, register the default music directories
     if (app_config.num_music_dirs == 0) {
+#if defined(__ANDROID__) || defined(PLATFORM_ANDROID)
+        config_add_music_dir("/storage/emulated/0/Music");
+        config_add_music_dir("/storage/emulated/0/Download");
+#else
         char *def_music = NULL;
         if (asprintf(&def_music, "%s/Music", home) >= 0 && def_music) {
             config_add_music_dir(def_music);
             free(def_music);
         }
+#endif
     }
 
     if (!found_ini) {
@@ -467,21 +473,41 @@ bool config_find_child_music_dir(const char *path, char **out_child) {
     return found;
 }
 
+static pthread_mutex_t s_cfg_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 void config_add_music_dir(const char *path) {
     if (!path || !path[0]) return;
     char *norm_target = normalize_path_dup(path);
     if (!norm_target) return;
     size_t target_len = strlen(norm_target);
 
-    // Remove any identical or redundant child subdirectories
+    pthread_mutex_lock(&s_cfg_mutex);
+
+    // Skip if target is already inside an existing parent directory
+    for (int i = 0; i < app_config.num_music_dirs; i++) {
+        char *norm_entry = normalize_path_dup(app_config.music_dirs[i]);
+        if (norm_entry) {
+            size_t entry_len = strlen(norm_entry);
+            bool is_sub = (strcmp(norm_entry, norm_target) == 0) ||
+                          (target_len > entry_len && strncmp(norm_target, norm_entry, entry_len) == 0 && norm_target[entry_len] == '/');
+            free(norm_entry);
+            if (is_sub) {
+                free(norm_target);
+                pthread_mutex_unlock(&s_cfg_mutex);
+                return;
+            }
+        }
+    }
+
+    // Prune existing child directories that fall inside the new target
     int write_idx = 0;
     for (int i = 0; i < app_config.num_music_dirs; i++) {
         char *norm_entry = normalize_path_dup(app_config.music_dirs[i]);
         if (norm_entry) {
-            bool is_child_or_same = (strcmp(norm_entry, norm_target) == 0) ||
-                                   (strncmp(norm_entry, norm_target, target_len) == 0 && norm_entry[target_len] == '/');
+            size_t entry_len = strlen(norm_entry);
+            bool is_child = (entry_len > target_len && strncmp(norm_entry, norm_target, target_len) == 0 && norm_entry[target_len] == '/');
             free(norm_entry);
-            if (is_child_or_same) {
+            if (is_child) {
                 free(app_config.music_dirs[i]);
                 continue;
             }
@@ -495,7 +521,9 @@ void config_add_music_dir(const char *path) {
         app_config.music_dirs = realloc(app_config.music_dirs, sizeof(char*) * app_config.music_dirs_capacity);
     }
     app_config.music_dirs[app_config.num_music_dirs++] = norm_target;
+
     config_save();
+    pthread_mutex_unlock(&s_cfg_mutex);
 }
 
 void config_remove_music_dir(const char *path) {

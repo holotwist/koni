@@ -380,6 +380,7 @@ void format_list_item(char* out_buf, size_t out_size, int max_w, const char* fil
 }
 
 void ui_draw_box(int y, int x, int h, int w, const char* title, int color_pair) {
+#if !defined(__ANDROID__) && !defined(PLATFORM_ANDROID)
     attron(COLOR_PAIR(color_pair));
     mvhline(y, x+1, ACS_HLINE, w-2);
     mvhline(y+h-1, x+1, ACS_HLINE, w-2);
@@ -397,4 +398,7 @@ void ui_draw_box(int y, int x, int h, int w, const char* title, int color_pair) 
         attroff(A_REVERSE);
     }
     attroff(COLOR_PAIR(color_pair));
+#else
+    (void)y; (void)x; (void)h; (void)w; (void)title; (void)color_pair;
+#endif
 }

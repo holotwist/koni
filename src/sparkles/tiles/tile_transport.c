@@ -1,4 +1,5 @@
 #include "sparkles_widgets.h"
+#include "input/sparkles_input.h"
 #include "state.h"
 
 void tile_transport_render(SparklesTile *tile, Rectangle b) {
@@ -30,22 +31,22 @@ void tile_transport_render(SparklesTile *tile, Rectangle b) {
 
 void tile_transport_input(SparklesTile *tile, Rectangle b) {
     (void)tile;
-    Vector2 m = GetMousePosition();
-    Vector2 c = { b.x + b.width / 2.0f, b.y + b.height / 2.0f };
+    if (sparkles_input_is_consumed()) return;
 
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        if (CheckCollisionPointCircle(m, c, 36.0f)) {
-            if (atomic_load(&play_state_atomic) == STATE_STOPPED && playing_filepath[0] != '\0') {
-                atomic_store(&current_cmd_atomic, CMD_PLAY);
-            } else {
-                atomic_store(&current_cmd_atomic, CMD_PAUSE);
-            }
-        }
-        if (CheckCollisionPointRec(m, (Rectangle){ c.x - 90, c.y - 25, 45, 50 })) {
-            atomic_store(&current_cmd_atomic, CMD_PREV);
-        }
-        if (CheckCollisionPointRec(m, (Rectangle){ c.x + 45, c.y - 25, 45, 50 })) {
-            atomic_store(&current_cmd_atomic, CMD_NEXT);
+    Vector2 c = { b.x + b.width / 2.0f, b.y + b.height / 2.0f };
+    Rectangle prev_btn = { c.x - 90, c.y - 25, 45, 50 };
+    Rectangle next_btn = { c.x + 45, c.y - 25, 45, 50 };
+    Rectangle play_btn = { c.x - 30, c.y - 25, 60, 50 };
+
+    if (sparkles_input_consume_tap(prev_btn, NULL)) {
+        atomic_store(&current_cmd_atomic, CMD_PREV);
+    } else if (sparkles_input_consume_tap(next_btn, NULL)) {
+        atomic_store(&current_cmd_atomic, CMD_NEXT);
+    } else if (sparkles_input_consume_tap(play_btn, NULL)) {
+        if (atomic_load(&play_state_atomic) == STATE_STOPPED && playing_filepath[0] != '\0') {
+            atomic_store(&current_cmd_atomic, CMD_PLAY);
+        } else {
+            atomic_store(&current_cmd_atomic, CMD_PAUSE);
         }
     }
 }

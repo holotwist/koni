@@ -74,8 +74,9 @@ typedef struct {
     int   (*control)(KoniDecoder *dec, int cmd_id, void *arg_in, void *arg_out);
 } KoniCodecImpl;
 
-// Global Registry
+// Global Registry & Temp Art Management
 void koni_codecs_init(void);
+char* koni_codec_save_temp_art(const uint8_t *data, size_t size, const char *ext_hint);
 const KoniCodecImpl* koni_find_codec_by_ext(const char* filepath);
 bool koni_is_supported_extension(const char* ext);
 void koni_metadata_free(KoniMetadata* meta);

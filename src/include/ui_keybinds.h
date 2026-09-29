@@ -54,9 +54,16 @@ typedef struct {
     const char *default_keys;
 } KeybindDefault;
 
+#if defined(__ANDROID__) || defined(PLATFORM_ANDROID)
+static inline void ui_keybinds_init(void) {}
+static inline bool ui_keybinds_set(const char *action_name, const char *keys_str) { (void)action_name; (void)keys_str; return true; }
+static inline UIAction ui_keybinds_get_action(int ch) { (void)ch; return ACTION_NONE; }
+static inline const KeybindDefault* ui_keybinds_get_defaults(int *out_count) { if (out_count) *out_count = 0; return NULL; }
+#else
 void ui_keybinds_init(void);
 bool ui_keybinds_set(const char *action_name, const char *keys_str);
 UIAction ui_keybinds_get_action(int ch);
 const KeybindDefault* ui_keybinds_get_defaults(int *out_count);
+#endif
 
 #endif // UI_KEYBINDS_H

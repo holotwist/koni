@@ -3,6 +3,7 @@
 
 #include "listening_profile.h"
 #include "config.h"
+#include "koni_paths.h"
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,14 +37,8 @@ bool listening_profile_init(void) {
         return true;
     }
 
-    const char *home = getenv("HOME");
-    if (!home) {
-        pthread_mutex_unlock(&s_pdb_mutex);
-        return false;
-    }
-
     char db_path[1024];
-    snprintf(db_path, sizeof(db_path), "%s/.config/koni/profile.db", home);
+    koni_get_path(db_path, sizeof(db_path), "profile.db");
 
     if (sqlite3_open(db_path, &s_pdb) != SQLITE_OK) {
         pthread_mutex_unlock(&s_pdb_mutex);

@@ -23,7 +23,8 @@ LyricDocument* lrc_parse_document(const char *raw_data, size_t len) {
 
     LyricDocument *doc = lyric_document_create();
     strncpy(doc->format_name, "LRC", sizeof(doc->format_name) - 1);
-    char *line = strtok(copy, "\n");
+    char *saveptr = NULL;
+    char *line = strtok_r(copy, "\n", &saveptr);
     int valid_lines = 0;
 
     while (line) {
@@ -81,7 +82,7 @@ LyricDocument* lrc_parse_document(const char *raw_data, size_t len) {
             }
             free(text);
         }
-        line = strtok(NULL, "\n");
+        line = strtok_r(NULL, "\n", &saveptr);
     }
     free(copy);
 

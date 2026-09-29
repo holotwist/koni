@@ -13,8 +13,13 @@ static bool s_search_active = false;
 static char s_search_buf[64] = {0};
 static int s_search_len = 0;
 static int s_filtered_indices[65536];
+static int s_filtered_count = 0;
 static char s_prev_playing_path[1024] = {0};
 static bool s_locate_request = false;
+
+static inline int get_song_row_h(float ui_scale) {
+    return (int)fmaxf(38.0f, 32.0f * ui_scale);
+}
 
 static bool str_contains_ci(const char *haystack, const char *needle) {
     if (!needle || !needle[0]) return true;
@@ -104,28 +109,31 @@ void tile_song_list_render(SparklesTile *tile, Rectangle b) {
         DrawText("[x]", (int)(b.x + b.width - 32), (int)(b.y + 18), FONT_SIZE_SM, COLOR_TEXT_MUTED);
     }
 
-    // Partitioned columns
-    float time_w = (float)MeasureText("00:00", FONT_SIZE_SM) + 4.0f;
-    float time_x = b.x + b.width - time_w - 18.0f;
-    float art_x  = b.x + 64.0f;
+    float ui_scale = sparkles_get_ui_scale();
+
+    // Partitioned columns with density scaling
+    float time_w = (float)MeasureText("00:00", FONT_SIZE_SM) + (8.0f * ui_scale);
+    float time_x = b.x + b.width - time_w - (16.0f * ui_scale);
+    float art_x  = b.x + (48.0f * ui_scale);
     float tit_x  = b.x + (b.width * 0.40f);
-    if (tit_x < art_x + 90.0f) tit_x = art_x + 90.0f;
+    if (tit_x < art_x + 90.0f * ui_scale) tit_x = art_x + 90.0f * ui_scale;
 
-    float art_w = tit_x - art_x - 12.0f;
-    float tit_w = time_x - tit_x - 12.0f;
+    float art_w = tit_x - art_x - (10.0f * ui_scale);
+    float tit_w = time_x - tit_x - (10.0f * ui_scale);
 
-    float hdr_y = b.y + 44;
-    DrawText("Play", (int)(b.x + 18), (int)hdr_y, FONT_SIZE_SM, COLOR_TEXT_DARK);
+    float hdr_y = b.y + (48.0f * ui_scale);
+    DrawText("Play", (int)(b.x + 14 * ui_scale), (int)hdr_y, FONT_SIZE_SM, COLOR_TEXT_DARK);
     DrawText("Artist", (int)art_x, (int)hdr_y, FONT_SIZE_SM, COLOR_TEXT_DARK);
     DrawText("Title", (int)tit_x, (int)hdr_y, FONT_SIZE_SM, COLOR_TEXT_DARK);
     DrawText("Time", (int)time_x, (int)hdr_y, FONT_SIZE_SM, COLOR_TEXT_DARK);
 
     pthread_mutex_lock(&state_mutex);
 
-    // Build filtered indices if search active
+    // Filtered indices with safety clamp
     int total_tracks = num_library_tracks;
     int count = 0;
-    for (int t = 0; t < total_tracks; t++) {
+    int max_cap = (int)(sizeof(s_filtered_indices) / sizeof(s_filtered_indices[0]));
+    for (int t = 0; t < total_tracks && count < max_cap; t++) {
         if (!s_search_active || s_search_len == 0 ||
             str_contains_ci(library_tracks[t].title, s_search_buf) ||
             str_contains_ci(library_tracks[t].artist, s_search_buf) ||
@@ -134,8 +142,9 @@ void tile_song_list_render(SparklesTile *tile, Rectangle b) {
         }
     }
 
-    int row_h = 32;
-    int max_rows = (int)(b.height - 74) / row_h;
+    int row_h = get_song_row_h(ui_scale);
+    int header_offset = (int)(hdr_y + FONT_SIZE_SM + 8.0f * ui_scale - b.y);
+    int max_rows = (int)(b.height - (float)header_offset) / row_h;
 
     /* Cursor Rule
        If the playing song changed
@@ -192,46 +201,50 @@ void tile_song_list_render(SparklesTile *tile, Rectangle b) {
         s_locate_request = false;
     }
 
+    s_filtered_count = count;
+
     // Bounds checking on scroll offset
     if (s_song_scroll > count - max_rows) s_song_scroll = count - max_rows;
     if (s_song_scroll < 0) s_song_scroll = 0;
 
     Vector2 mouse = GetMousePosition();
 
+    float start_rows_y = b.y + (float)header_offset;
+
     for (int i = 0; i < max_rows && (i + s_song_scroll) < count; i++) {
         int target = s_filtered_indices[i + s_song_scroll];
-        float y = b.y + 70 + (i * row_h);
+        float y = start_rows_y + (i * row_h);
         bool is_playing = (playing_filepath[0] != '\0' &&
                            strcmp(library_tracks[target].path, playing_filepath) == 0);
         bool is_cursor = (target == selected_library_idx);
 
-        Rectangle row_bar = { b.x + 8, y - 2, b.width - 16, (float)row_h };
+        Rectangle row_bar = { b.x + 6, y, b.width - 12, (float)row_h - 2.0f };
         bool is_hover = CheckCollisionPointRec(mouse, row_bar);
 
-        // Dim white cursor bar over the song
         if (is_cursor) {
-            DrawRectangleRec(row_bar, (Color){ 255, 255, 255, 15 });
-            DrawRectangle((int)row_bar.x, (int)row_bar.y + 4, 2, (int)row_bar.height - 8, is_playing ? COLOR_ACCENT : (Color){ 220, 225, 235, 180 });
+            DrawRectangleRec(row_bar, (Color){ 255, 255, 255, 18 });
+            DrawRectangle((int)row_bar.x, (int)row_bar.y + 4, 3, (int)row_bar.height - 8, is_playing ? COLOR_ACCENT : (Color){ 220, 225, 235, 180 });
         } else if (is_hover) {
-            DrawRectangleRec(row_bar, (Color){ 255, 255, 255, 7 });
+            DrawRectangleRec(row_bar, (Color){ 255, 255, 255, 8 });
         }
 
         // Play glyph
-        DrawText(is_playing ? "||" : ">", (int)(b.x + 22), (int)(y + 2), FONT_SIZE_SM, is_playing ? COLOR_ACCENT : (is_cursor ? COLOR_TEXT_PRIMARY : COLOR_TEXT_MUTED));
+        float text_y = y + ((float)row_h - (float)FONT_SIZE_MD) * 0.5f;
+        DrawText(is_playing ? "||" : ">", (int)(b.x + 16 * ui_scale), (int)text_y, FONT_SIZE_SM, is_playing ? COLOR_ACCENT : (is_cursor ? COLOR_TEXT_PRIMARY : COLOR_TEXT_MUTED));
 
-        // Artist
+        // Artist column
         const char *art = library_tracks[target].artist[0] ? library_tracks[target].artist : "Unknown";
-        Rectangle art_col = { art_x, y + 2, art_w, (float)FONT_SIZE_MD };
-        DrawTextMarquee(art, art_col, b, FONT_SIZE_MD, COLOR_TEXT_MUTED, 24.0f);
+        Rectangle art_col = { art_x, text_y, art_w, (float)FONT_SIZE_SM * 1.3f };
+        DrawTextMarquee(art, art_col, b, FONT_SIZE_SM, COLOR_TEXT_MUTED, 24.0f);
 
-        // Title
+        // Title column
         const char *tit = library_tracks[target].title[0] ? library_tracks[target].title : library_tracks[target].name;
-        Rectangle tit_col = { tit_x, y + 2, tit_w, (float)FONT_SIZE_MD };
-        DrawTextMarquee(tit, tit_col, b, FONT_SIZE_MD, is_playing ? COLOR_ACCENT : COLOR_TEXT_PRIMARY, 28.0f);
+        Rectangle tit_col = { tit_x, text_y, tit_w, (float)FONT_SIZE_SM * 1.3f };
+        DrawTextMarquee(tit, tit_col, b, FONT_SIZE_SM, is_playing ? COLOR_ACCENT : COLOR_TEXT_PRIMARY, 28.0f);
 
         // Duration right-aligned
         uint32_t dur = library_tracks[target].duration_sec;
-        DrawText(TextFormat("%u:%02u", dur / 60, dur % 60), (int)time_x, (int)(y + 3), FONT_SIZE_SM, COLOR_TEXT_DARK);
+        DrawText(TextFormat("%u:%02u", dur / 60, dur % 60), (int)time_x, (int)text_y, FONT_SIZE_SM, COLOR_TEXT_DARK);
     }
 
     // Scrollbar indicator
@@ -247,6 +260,8 @@ void tile_song_list_render(SparklesTile *tile, Rectangle b) {
 
 void tile_song_list_input(SparklesTile *tile, Rectangle b) {
     (void)tile;
+    if (sparkles_input_is_consumed()) return;
+
     Vector2 m = GetMousePosition();
 
     // Keyboard navigation when not typing in search
@@ -372,31 +387,27 @@ void tile_song_list_input(SparklesTile *tile, Rectangle b) {
         if (s_song_scroll < 0) s_song_scroll = 0;
     }
 
+    float ui_scale = sparkles_get_ui_scale();
+    int row_h = get_song_row_h(ui_scale);
+    float start_rows_y = b.y + (48.0f * ui_scale) + (float)FONT_SIZE_SM + (8.0f * ui_scale);
+
     // Long-press or right-click context menu
     Vector2 lp;
     if (sparkles_input_consume_long_press(b, &lp)) {
-        if (lp.y >= b.y + 70.0f) {
-            int clicked = s_song_scroll + (int)(lp.y - (b.y + 70.0f)) / 32;
+        if (lp.y >= start_rows_y) {
+            int clicked = s_song_scroll + (int)floorf((lp.y - start_rows_y) / (float)row_h);
             pthread_mutex_lock(&state_mutex);
-            int match_count = 0;
-            for (int t = 0; t < num_library_tracks; t++) {
-                if (!s_search_active || s_search_len == 0 ||
-                    str_contains_ci(library_tracks[t].title, s_search_buf) ||
-                    str_contains_ci(library_tracks[t].artist, s_search_buf) ||
-                    str_contains_ci(library_tracks[t].name, s_search_buf)) {
-                    if (match_count == clicked) {
-                        SparklesTrackItem item = {0};
-                        strncpy(item.path, library_tracks[t].path, sizeof(item.path) - 1);
-                        strncpy(item.title, library_tracks[t].title[0] ? library_tracks[t].title : library_tracks[t].name, sizeof(item.title) - 1);
-                        strncpy(item.artist, library_tracks[t].artist, sizeof(item.artist) - 1);
-                        strncpy(item.album, library_tracks[t].album, sizeof(item.album) - 1);
-                        item.duration_sec = library_tracks[t].duration_sec;
-                        pthread_mutex_unlock(&state_mutex);
-                        sparkles_context_menu_open(lp, &item);
-                        return;
-                    }
-                    match_count++;
-                }
+            if (clicked >= 0 && clicked < s_filtered_count) {
+                int t = s_filtered_indices[clicked];
+                SparklesTrackItem item = {0};
+                strncpy(item.path, library_tracks[t].path, sizeof(item.path) - 1);
+                strncpy(item.title, library_tracks[t].title[0] ? library_tracks[t].title : library_tracks[t].name, sizeof(item.title) - 1);
+                strncpy(item.artist, library_tracks[t].artist, sizeof(item.artist) - 1);
+                strncpy(item.album, library_tracks[t].album, sizeof(item.album) - 1);
+                item.duration_sec = library_tracks[t].duration_sec;
+                pthread_mutex_unlock(&state_mutex);
+                sparkles_context_menu_open(lp, &item);
+                return;
             }
             pthread_mutex_unlock(&state_mutex);
             return;
@@ -416,29 +427,21 @@ void tile_song_list_input(SparklesTile *tile, Rectangle b) {
             return;
         }
 
-        if (tap.y >= b.y + 70.0f) {
-            int clicked = s_song_scroll + (int)(tap.y - (b.y + 70.0f)) / 32;
+        if (tap.y >= start_rows_y) {
+            int clicked = s_song_scroll + (int)floorf((tap.y - start_rows_y) / (float)row_h);
             pthread_mutex_lock(&state_mutex);
-            int match_count = 0;
-            for (int t = 0; t < num_library_tracks; t++) {
-                if (!s_search_active || s_search_len == 0 ||
-                    str_contains_ci(library_tracks[t].title, s_search_buf) ||
-                    str_contains_ci(library_tracks[t].artist, s_search_buf) ||
-                    str_contains_ci(library_tracks[t].name, s_search_buf)) {
-                    if (match_count == clicked) {
-                        selected_library_idx = t;
-                        strncpy(playing_filepath, library_tracks[t].path, sizeof(playing_filepath) - 1);
-                        strncpy(playing_filename, library_tracks[t].name, 255);
-                        playing_file_idx = t;
-                        current_play_source = SOURCE_LIBRARY;
-                        pthread_mutex_unlock(&state_mutex);
+            if (clicked >= 0 && clicked < s_filtered_count) {
+                int target = s_filtered_indices[clicked];
+                selected_library_idx = target;
+                strncpy(playing_filepath, library_tracks[target].path, sizeof(playing_filepath) - 1);
+                strncpy(playing_filename, library_tracks[target].name, 255);
+                playing_file_idx = target;
+                current_play_source = SOURCE_LIBRARY;
+                pthread_mutex_unlock(&state_mutex);
 
-                        atomic_store(&seek_target_ms, -1);
-                        atomic_store(&current_cmd_atomic, CMD_PLAY);
-                        return;
-                    }
-                    match_count++;
-                }
+                atomic_store(&seek_target_ms, -1);
+                atomic_store(&current_cmd_atomic, CMD_PLAY);
+                return;
             }
             pthread_mutex_unlock(&state_mutex);
         }

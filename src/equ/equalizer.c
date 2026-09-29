@@ -1,6 +1,7 @@
 #define _DEFAULT_SOURCE
 #include "equalizer.h"
 #include "peq.h"
+#include "state.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -24,23 +25,23 @@ static const char *s_freq_labels[EQ_NUM_BANDS] = {
 };
 
 static const EQPreset s_presets[] = {
-    { "Flat",            {  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f } },
-    { "Bass Boost",      { +6.0f, +5.0f, +4.0f, +2.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f } },
-    { "Hardbass",        { +5.0f, +7.0f, +6.0f, +2.0f, -2.0f, -1.0f, +1.0f, +3.0f, +5.0f, +4.0f } },
-    { "EDM / Dance",     { +6.0f, +6.0f, +3.0f,  0.0f, -2.0f, +1.0f, +2.0f, +3.5f, +5.0f, +4.0f } },
-    { "Hip-Hop / Trap",  { +6.5f, +5.5f, +2.0f, -1.5f, -2.0f,  0.0f, +1.5f, +2.5f, +5.0f, +3.5f } },
-    { "Metal",           { +2.0f, +5.0f, +3.0f,  0.0f, -3.0f, -2.0f, +2.0f, +4.0f, +4.0f, +3.0f } },
-    { "Rock",            { +5.0f, +4.0f, +2.0f, -1.0f, -1.0f,  0.0f, +2.0f, +3.0f, +4.0f, +5.0f } },
-    { "Pop",             { -1.0f, +1.0f, +3.0f, +4.0f, +3.0f, +1.0f, -1.0f, -1.0f, +1.0f, +2.0f } },
-    { "Vocaloid / Synth",{ +2.0f, +4.0f, +3.0f, +2.0f, -1.0f, +2.0f, +1.0f, -1.5f, +1.0f, +3.0f } },
-    { "Electronic",      { +5.0f, +4.0f, +2.0f,  0.0f, -1.0f, +2.0f,  0.0f, +1.0f, +4.0f, +5.0f } },
-    { "V-Shape (Smile)", { +4.0f, +5.0f, +3.0f, +1.0f, -2.0f, -2.5f, -1.0f, +1.5f, +4.0f, +4.5f } },
-    { "Lofi / Chill",    { -4.0f, +1.0f, +3.0f, +3.5f, +1.5f,  0.0f, -1.0f, -2.0f, -3.5f, -6.0f } },
-    { "Jazz",            {  0.0f, +2.0f, +3.0f, +1.5f,  0.0f,  0.0f, +1.0f, +2.0f, +2.5f, +1.5f } },
-    { "Acoustic",        { +3.0f, +2.0f, +1.0f, +1.0f, +1.0f, +1.0f, +2.0f, +2.0f, +3.0f, +2.0f } },
-    { "Classical",       { +4.0f, +3.0f, +2.0f, +1.0f, -1.0f, -1.0f,  0.0f, +2.0f, +3.0f, +3.0f } },
-    { "Vocal",           { -2.0f, -2.0f, -1.0f, +2.0f, +4.0f, +4.0f, +3.0f, +1.0f,  0.0f, -2.0f } },
-    { "Podcast",         { -8.0f, -4.0f, -1.0f, -2.0f,  0.0f, +2.5f, +3.5f, +2.0f, -1.5f, -4.0f } }
+    { "Flat",               0.0f, {  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f } },
+    { "Bass Boost",        -6.0f, { +6.0f, +5.0f, +4.0f, +2.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f,  0.0f } },
+    { "Hardbass",          -7.0f, { +5.0f, +7.0f, +6.0f, +2.0f, -2.0f, -1.0f, +1.0f, +3.0f, +5.0f, +4.0f } },
+    { "EDM / Dance",       -6.0f, { +6.0f, +6.0f, +3.0f,  0.0f, -2.0f, +1.0f, +2.0f, +3.5f, +5.0f, +4.0f } },
+    { "Hip-Hop / Trap",    -6.5f, { +6.5f, +5.5f, +2.0f, -1.5f, -2.0f,  0.0f, +1.5f, +2.5f, +5.0f, +3.5f } },
+    { "Metal",             -5.0f, { +2.0f, +5.0f, +3.0f,  0.0f, -3.0f, -2.0f, +2.0f, +4.0f, +4.0f, +3.0f } },
+    { "Rock",              -5.0f, { +5.0f, +4.0f, +2.0f, -1.0f, -1.0f,  0.0f, +2.0f, +3.0f, +4.0f, +5.0f } },
+    { "Pop",               -4.0f, { -1.0f, +1.0f, +3.0f, +4.0f, +3.0f, +1.0f, -1.0f, -1.0f, +1.0f, +2.0f } },
+    { "Vocaloid / Synth",  -4.0f, { +2.0f, +4.0f, +3.0f, +2.0f, -1.0f, +2.0f, +1.0f, -1.5f, +1.0f, +3.0f } },
+    { "Electronic",        -5.0f, { +5.0f, +4.0f, +2.0f,  0.0f, -1.0f, +2.0f,  0.0f, +1.0f, +4.0f, +5.0f } },
+    { "V-Shape (Smile)",   -5.0f, { +4.0f, +5.0f, +3.0f, +1.0f, -2.0f, -2.5f, -1.0f, +1.5f, +4.0f, +4.5f } },
+    { "Lofi / Chill",      -3.5f, { -4.0f, +1.0f, +3.0f, +3.5f, +1.5f,  0.0f, -1.0f, -2.0f, -3.5f, -6.0f } },
+    { "Jazz",              -3.0f, {  0.0f, +2.0f, +3.0f, +1.5f,  0.0f,  0.0f, +1.0f, +2.0f, +2.5f, +1.5f } },
+    { "Acoustic",          -3.0f, { +3.0f, +2.0f, +1.0f, +1.0f, +1.0f, +1.0f, +2.0f, +2.0f, +3.0f, +2.0f } },
+    { "Classical",         -4.0f, { +4.0f, +3.0f, +2.0f, +1.0f, -1.0f, -1.0f,  0.0f, +2.0f, +3.0f, +3.0f } },
+    { "Vocal",             -4.0f, { -2.0f, -2.0f, -1.0f, +2.0f, +4.0f, +4.0f, +3.0f, +1.0f,  0.0f, -2.0f } },
+    { "Podcast",           -3.5f, { -8.0f, -4.0f, -1.0f, -2.0f,  0.0f, +2.5f, +3.5f, +2.0f, -1.5f, -4.0f } }
 };
 
 static const int s_preset_count = (int)(sizeof(s_presets) / sizeof(s_presets[0]));
@@ -53,6 +54,7 @@ static float s_current_gains[EQ_NUM_BANDS] = {0};
 static bool s_needs_smoothing = false;
 static int s_current_preset = 0; // 0 = Flat, -1 = Custom
 static uint32_t s_current_srate = 44100;
+static float s_current_preamp_mult = 1.0f;
 static BiquadBand s_filters[EQ_NUM_BANDS];
 
 static void compute_biquad_coefficients(BiquadBand *filter, float f0, float gain_db, uint32_t srate) {
@@ -100,6 +102,7 @@ void eq_init(void) {
     s_enabled = false;
     s_eq_mode = EQ_MODE_GRAPHIC;
     s_current_preset = 0;
+    s_current_preamp_mult = 1.0f;
     memset(s_target_gains, 0, sizeof(s_target_gains));
     memset(s_current_gains, 0, sizeof(s_current_gains));
     s_needs_smoothing = false;
@@ -125,6 +128,7 @@ void eq_toggle_enabled(void) {
     pthread_mutex_lock(&s_eq_mutex);
     s_enabled = !s_enabled;
     pthread_mutex_unlock(&s_eq_mutex);
+    save_state();
 }
 
 EQMode eq_get_mode(void) {
@@ -138,12 +142,14 @@ void eq_set_mode(EQMode mode) {
     pthread_mutex_lock(&s_eq_mutex);
     s_eq_mode = mode;
     pthread_mutex_unlock(&s_eq_mutex);
+    save_state();
 }
 
 void eq_toggle_mode(void) {
     pthread_mutex_lock(&s_eq_mutex);
     s_eq_mode = (s_eq_mode == EQ_MODE_GRAPHIC) ? EQ_MODE_PARAMETRIC : EQ_MODE_GRAPHIC;
     pthread_mutex_unlock(&s_eq_mutex);
+    save_state();
 }
 
 float eq_get_band_gain(int band_idx) {
@@ -200,7 +206,10 @@ void eq_apply_preset(int preset_idx) {
     s_current_preset = preset_idx;
     memcpy(s_target_gains, s_presets[preset_idx].gains, sizeof(s_target_gains));
     s_needs_smoothing = true;
+    float pre = s_presets[preset_idx].preamp_db;
     pthread_mutex_unlock(&s_eq_mutex);
+    peq_set_preamp(pre);
+    save_state();
 }
 
 void eq_cycle_preset(void) {
@@ -208,7 +217,9 @@ void eq_cycle_preset(void) {
     s_current_preset = (s_current_preset + 1) % s_preset_count;
     memcpy(s_target_gains, s_presets[s_current_preset].gains, sizeof(s_target_gains));
     s_needs_smoothing = true;
+    float pre = s_presets[s_current_preset].preamp_db;
     pthread_mutex_unlock(&s_eq_mutex);
+    peq_set_preamp(pre);
 }
 
 void eq_reset_flat(void) {
@@ -311,12 +322,15 @@ void eq_process_float(float *samples_interleaved, uint32_t num_frames, uint16_t 
     uint16_t channels = (num_channels <= EQ_MAX_CHANNELS) ? num_channels : EQ_MAX_CHANNELS;
     uint32_t frames_processed = 0;
 
-    // ~20ms time constant for EQ band morphing
+    // Slew rate smoothing for preamp and biquad gains (~20ms)
     float block_alpha = 1.0f - expf(-((float)SUB_BLOCK_SIZE) / ((float)sample_rate * 0.020f));
+    float target_preamp = powf(10.0f, peq_get_preamp() / 20.0f);
 
     while (frames_processed < num_frames) {
         uint32_t block_frames = num_frames - frames_processed;
         if (block_frames > SUB_BLOCK_SIZE) block_frames = SUB_BLOCK_SIZE;
+
+        s_current_preamp_mult += block_alpha * (target_preamp - s_current_preamp_mult);
 
         // Smoothly slew target gains and update biquad coefficients
         if (s_needs_smoothing) {
@@ -340,7 +354,7 @@ void eq_process_float(float *samples_interleaved, uint32_t num_frames, uint16_t 
             uint32_t base = (frames_processed + f) * num_channels;
 
             for (uint16_t c = 0; c < channels; c++) {
-                double x = (double)samples_interleaved[base + c];
+                double x = (double)(samples_interleaved[base + c] * s_current_preamp_mult);
 
                 for (int b = 0; b < EQ_NUM_BANDS; b++) {
                     BiquadBand *filter = &s_filters[b];

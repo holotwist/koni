@@ -3,6 +3,7 @@
 
 #include "playlist_manager.h"
 #include "config.h"
+#include "koni_paths.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,20 +65,8 @@ static void fav_cache_add(const char *path) {
 }
 
 static void ensure_playlists_dir(void) {
-    const char *home = getenv("HOME");
-    if (!home) return;
-    snprintf(s_playlist_dir, sizeof(s_playlist_dir), "%s/.config/koni/playlists", home);
-    
-    char tmp[1024];
-    snprintf(tmp, sizeof(tmp), "%s", s_playlist_dir);
-    for (char *p = tmp + 1; *p; p++) {
-        if (*p == '/') {
-            *p = 0;
-            mkdir(tmp, 0755);
-            *p = '/';
-        }
-    }
-    mkdir(tmp, 0755);
+    koni_get_path(s_playlist_dir, sizeof(s_playlist_dir), "playlists");
+    koni_ensure_dir(s_playlist_dir);
 
     // Guarantee Favourites.m3u exists
     char fav_path[1024];
@@ -181,8 +170,10 @@ void playlist_mgmt_refresh_list(void) {
     }
 
     reload_favourites_cache();
+#if !defined(__ANDROID__) && !defined(PLATFORM_ANDROID)
     extern void ui_playlists_invalidate_cache(void);
     ui_playlists_invalidate_cache();
+#endif
     pthread_mutex_unlock(&s_pl_mutex);
 }
 

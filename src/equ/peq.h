@@ -61,6 +61,8 @@ void  peq_calculate_curve(float *out_db, int count, float min_freq, float max_fr
 int  peq_get_builtin_preset_count(void);
 const PEQPresetDef* peq_get_builtin_preset(int idx);
 void peq_apply_builtin_preset(int idx);
+const char* peq_get_active_preset_name(void);
+void peq_set_active_preset_name(const char *name);
 
 // External preset I/O (AutoEQ / Equalizer APO format)
 bool peq_load_file(const char *filepath);

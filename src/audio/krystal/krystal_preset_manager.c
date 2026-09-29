@@ -1,5 +1,6 @@
 #define _DEFAULT_SOURCE
 #include "krystal_preset_manager.h"
+#include "koni_paths.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,12 +18,7 @@ static int s_custom_count = 0;
 static pthread_mutex_t s_preset_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void get_ini_path(char *dst, size_t sz) {
-    const char *home = getenv("HOME");
-    if (home) {
-        snprintf(dst, sz, "%s/.config/koni/krystal_customs.ini", home);
-    } else {
-        dst[0] = '\0';
-    }
+    koni_get_path(dst, sz, "krystal_customs.ini");
 }
 
 static void trim_inplace(char *str) {

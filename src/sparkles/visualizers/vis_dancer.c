@@ -125,14 +125,6 @@ static Spotlight  s_spots[NUM_SPOTLIGHTS];
 static bool s_inited = false;
 
 // Helper functions
-static inline Vector2 rot_pt(Vector2 p, Vector2 pivot, float angle_rad) {
-    float s = sinf(angle_rad);
-    float c = cosf(angle_rad);
-    float dx = p.x - pivot.x;
-    float dy = p.y - pivot.y;
-    return (Vector2){ pivot.x + dx * c - dy * s, pivot.y + dx * s + dy * c };
-}
-
 static void DrawPolyStroke(const Vector2* pts, int count, float thick, Color c) {
     for (int i = 0; i < count; i++) {
         DrawLineEx(pts[i], pts[(i + 1) % count], thick, c);
@@ -565,11 +557,13 @@ void vis_dancer_render(Rectangle b, float dt) {
     float r_arm_angle = s_spr_arm_r.val;
 
     // Stage and motorized lightning
-    float scale = fminf(b.width, b.height) / 360.0f;
+    bool is_portrait = (b.height > b.width);
+    float scale = is_portrait ? (b.width / 260.0f) : (fminf(b.width, b.height) / 360.0f);
     if (scale < 0.5f) scale = 0.5f;
 
     float char_base_x = b.x + b.width * 0.5f;
-    float char_base_y = b.y + b.height * 0.5f;
+    // Align visual center of character with center of visualizer bounds
+    float char_base_y = b.y + (b.height * 0.5f) - (18.0f * scale);
     float floor_y = char_base_y + 111.5f * scale;
     float stage_floor = floor_y;
     float top_y = b.y + 4.0f;
@@ -577,8 +571,11 @@ void vis_dancer_render(Rectangle b, float dt) {
     // Top ceiling truss rail
     DrawLineEx((Vector2){ b.x, top_y }, (Vector2){ b.x + b.width, top_y }, 2.0f, (Color){ 28, 30, 38, 255 });
 
-    for (int i = 0; i < NUM_SPOTLIGHTS; i++) {
-        float fx = b.x + b.width * (0.16f + 0.226f * (float)i);
+    int active_spots = is_portrait ? 2 : NUM_SPOTLIGHTS;
+    for (int i = 0; i < active_spots; i++) {
+        float fx = is_portrait
+            ? (b.x + b.width * (0.28f + 0.44f * (float)i))
+            : (b.x + b.width * (0.16f + 0.226f * (float)i));
         float target_angle = 0.0f;
         Color target_color = (Color){ 80, 160, 240, 255 };
         float target_alpha = 0.05f;
@@ -808,7 +805,7 @@ void vis_dancer_render(Rectangle b, float dt) {
     DrawQuadFill(l_leg_pts[0], l_leg_pts[1], l_leg_pts[2], l_leg_pts[3], COLOR_CUTOUT);
     DrawPolyStroke(l_leg_pts, 4, 2.1f, COLOR_KONI_PURPLE);
     DrawQuadFill((Vector2){-25.89f, 105.29f}, (Vector2){-4.14f, 105.53f}, (Vector2){-3.15f, 110.60f}, (Vector2){-26.10f, 110.06f}, COLOR_KONI_PURPLE);
-    DrawEllipse(-17.30f, 57.40f, 2.8f, 2.7f, COLOR_KONI_PURPLE); // L Joint Dot
+    DrawEllipse((int)-17.30f, (int)57.40f, 2.8f, 2.7f, COLOR_KONI_PURPLE); // L Joint Dot
     rlPopMatrix();
 
     // Right leg
@@ -821,7 +818,7 @@ void vis_dancer_render(Rectangle b, float dt) {
     DrawQuadFill(r_leg_pts[0], r_leg_pts[1], r_leg_pts[2], r_leg_pts[3], COLOR_CUTOUT);
     DrawPolyStroke(r_leg_pts, 4, 2.1f, COLOR_KONI_PURPLE);
     DrawQuadFill((Vector2){8.05f, 105.42f}, (Vector2){28.59f, 104.02f}, (Vector2){31.32f, 108.84f}, (Vector2){9.49f, 110.76f}, COLOR_KONI_PURPLE);
-    DrawEllipse(-1.51f, 57.10f, 2.8f, 2.7f, COLOR_KONI_PURPLE); // R Joint Dot
+    DrawEllipse((int)-1.51f, (int)57.10f, 2.8f, 2.7f, COLOR_KONI_PURPLE); // R Joint Dot
     rlPopMatrix();
 
     // Root frame, hips sway, dip, bounce, squash
@@ -845,7 +842,7 @@ void vis_dancer_render(Rectangle b, float dt) {
         DrawPolyStroke(l_arm_pts, 4, 2.1f, COLOR_KONI_PURPLE);
         DrawQuadFill((Vector2){-50.66f, 46.74f}, (Vector2){-31.88f, 55.37f}, (Vector2){-33.39f, 60.50f}, (Vector2){-53.26f, 50.78f}, COLOR_KONI_PURPLE);
         rlPopMatrix();
-        DrawEllipse(-19.62f, 5.26f, 2.7f, 2.8f, COLOR_KONI_PURPLE);
+        DrawEllipse((int)-19.62f, (int)5.26f, 2.7f, 2.8f, COLOR_KONI_PURPLE);
     }
 
     // Torso/dress
@@ -854,7 +851,7 @@ void vis_dancer_render(Rectangle b, float dt) {
     DrawQuadFill(torso_pts[5], torso_pts[2], torso_pts[3], torso_pts[4], COLOR_CUTOUT);
     DrawPolyStroke(torso_pts, 6, 2.1f, COLOR_KONI_PURPLE);
     DrawLineEx((Vector2){-33.93f, 42.69f}, (Vector2){13.92f, 49.48f}, 2.1f, COLOR_KONI_PURPLE);
-    DrawEllipse(-4.09f, 10.45f, 3.58f, 3.57f, COLOR_KONI_PURPLE);
+    DrawEllipse((int)-4.09f, (int)10.45f, 3.58f, 3.57f, COLOR_KONI_PURPLE);
 
     // Left arm on hip (over dress)
     if (l_arm_on_hip) {
@@ -869,7 +866,7 @@ void vis_dancer_render(Rectangle b, float dt) {
         DrawQuadFill((Vector2){-19.14f, 36.07f}, (Vector2){-36.63f, 46.19f}, (Vector2){-34.76f, 51.17f}, (Vector2){-16.09f, 40.14f}, COLOR_KONI_PURPLE);
         DrawQuadFill((Vector2){-22.32f, 14.38f}, (Vector2){-28.78f, 8.46f}, (Vector2){-26.24f, 6.25f}, (Vector2){-20.56f, 11.78f}, COLOR_KONI_PURPLE);
         rlPopMatrix();
-        DrawEllipse(-19.62f, 5.26f, 2.7f, 2.8f, COLOR_KONI_PURPLE);
+        DrawEllipse((int)-19.62f, (int)5.26f, 2.7f, 2.8f, COLOR_KONI_PURPLE);
     }
 
     // Right arm (over dress)
@@ -892,7 +889,7 @@ void vis_dancer_render(Rectangle b, float dt) {
         DrawQuadFill((Vector2){20.10f, 14.62f}, (Vector2){11.98f, 18.85f}, (Vector2){11.38f, 15.01f}, (Vector2){18.77f, 12.06f}, COLOR_KONI_PURPLE);
     }
     rlPopMatrix();
-    DrawEllipse(10.37f, 4.58f, 2.7f, 2.8f, COLOR_KONI_PURPLE);
+    DrawEllipse((int)10.37f, (int)4.58f, 2.7f, 2.8f, COLOR_KONI_PURPLE);
 
     // Head and hair, pivoting subtly on the neck axis (invisible axis)
     rlPushMatrix();
@@ -903,20 +900,20 @@ void vis_dancer_render(Rectangle b, float dt) {
     float h_squash_x = 1.0f / h_squash_y;
     rlScalef(h_squash_x, h_squash_y, 1.0f);
 
-    DrawEllipse(0.03f, -38.50f, 35.6f, 35.0f, COLOR_KONI_PURPLE); // Main Head Circle
+    DrawEllipse((int)0.03f, (int)-38.50f, 35.6f, 35.0f, COLOR_KONI_PURPLE); // Main Head Circle
 
     // Left circle tail (inertial sway via spring)
     rlPushMatrix();
     rlTranslatef(-30.0f, -40.0f, 0.0f);
     rlRotatef(s_spr_hair_l.val, 0, 0, 1);
-    DrawEllipse(-13.83f, -28.58f, 16.35f, 16.50f, COLOR_KONI_PURPLE);
+    DrawEllipse((int)-13.83f, (int)-28.58f, 16.35f, 16.50f, COLOR_KONI_PURPLE);
     rlPopMatrix();
 
     // Right circle tail (inertial sway via spring)
     rlPushMatrix();
     rlTranslatef(30.0f, -40.0f, 0.0f);
     rlRotatef(s_spr_hair_r.val, 0, 0, 1);
-    DrawEllipse(19.18f, -21.38f, 16.35f, 16.50f, COLOR_KONI_PURPLE);
+    DrawEllipse((int)19.18f, (int)-21.38f, 16.35f, 16.50f, COLOR_KONI_PURPLE);
     rlPopMatrix();
 
     // Tufts

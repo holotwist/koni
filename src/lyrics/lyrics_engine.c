@@ -4,6 +4,7 @@
 #include "lyrics.h"
 #include "ui_common.h"
 #include "config.h"
+#include "koni_paths.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -87,15 +88,12 @@ static void save_lyrics_cache(const LyricFetchQuery *query, const char *raw_data
     FILE *f = fopen(target_path, "w");
     if (f) { fputs(raw_data, f); fclose(f); return; }
 
-    const char *home = getenv("HOME");
-    if (home) {
-        char fallback_dir[1024];
-        snprintf(fallback_dir, sizeof(fallback_dir), "%s/.config/koni/lyrics", home);
-        ensure_dir_exists(fallback_dir);
-        snprintf(target_path, sizeof(target_path), "%s/%s%s", fallback_dir, safe_name, ext);
-        f = fopen(target_path, "w");
-        if (f) { fputs(raw_data, f); fclose(f); }
-    }
+    char fallback_dir[1024];
+    koni_get_path(fallback_dir, sizeof(fallback_dir), "lyrics");
+    koni_ensure_dir(fallback_dir);
+    snprintf(target_path, sizeof(target_path), "%s/%s%s", fallback_dir, safe_name, ext);
+    f = fopen(target_path, "w");
+    if (f) { fputs(raw_data, f); fclose(f); }
 }
 
 static void free_lyric_query(LyricFetchQuery *query) {
@@ -165,13 +163,12 @@ static void* lyrics_engine_worker(void *arg) {
                 data = try_read_file(path);
             }
 
-            // Fallback ~/.config/koni/lyrics/
+            // Fallback lyrics directory
             if (!data) {
-                const char *home = getenv("HOME");
-                if (home) {
-                    snprintf(path, sizeof(path), "%s/.config/koni/lyrics/%s%s", home, safe_name, exts[e]);
-                    data = try_read_file(path);
-                }
+                char subpath[512];
+                snprintf(subpath, sizeof(subpath), "lyrics/%s%s", safe_name, exts[e]);
+                koni_get_path(path, sizeof(path), subpath);
+                data = try_read_file(path);
             }
 
             if (data) {

@@ -38,6 +38,7 @@ int main(int argc, char **argv) {
     }
 
     setlocale(LC_ALL, ""); 
+    koni_codecs_init();
     config_init(); // Initialize configuration manager
     db_init(); // Initialize SQLite cache
     playlist_mgmt_init(); // Initialize playlists & favourites

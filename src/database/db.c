@@ -3,6 +3,7 @@
 
 #include "db.h"
 #include "config.h"
+#include "koni_paths.h"
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,33 +26,10 @@ static void sql_basename(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
     sqlite3_result_text(ctx, slash ? slash + 1 : (const char *)text, -1, SQLITE_TRANSIENT);
 }
 
-static void ensure_dir(const char *path) {
-    char tmp[1024];
-    snprintf(tmp, sizeof(tmp), "%s", path);
-    for (char *p = tmp + 1; *p; p++) {
-        if (*p == '/') {
-            *p = 0;
-            mkdir(tmp, 0755);
-            *p = '/';
-        }
-    }
-    mkdir(tmp, 0755);
-}
-
 bool db_init(void) {
     pthread_mutex_lock(&db_mutex);
-    const char *home = getenv("HOME");
-    if (!home) {
-        pthread_mutex_unlock(&db_mutex);
-        return false;
-    }
-
-    char db_dir[1024];
-    snprintf(db_dir, sizeof(db_dir), "%s/.config/koni", home);
-    ensure_dir(db_dir);
-
     char db_path[1024];
-    snprintf(db_path, sizeof(db_path), "%s/library.db", db_dir);
+    koni_get_path(db_path, sizeof(db_path), "library.db");
 
     if (sqlite3_open(db_path, &db) != SQLITE_OK) {
         fprintf(stderr, "SQLite open error: %s\n", sqlite3_errmsg(db));
@@ -237,6 +215,18 @@ void db_prune_missing_files(void) {
                     // File exists on disk but is not in any selected music folder
                     should_remove = true;
                 }
+
+                #if !defined(__ANDROID__) && !defined(PLATFORM_ANDROID)
+                if (access(path, F_OK) != 0) {
+                    should_remove = true;
+                } else if (!config_find_parent_music_dir(path, NULL)) {
+                    should_remove = true;
+                }
+#else
+                if (access(path, F_OK) != 0) {
+                    should_remove = true;
+                }
+#endif
 
                 if (should_remove) {
                     sqlite3_reset(del_stmt);

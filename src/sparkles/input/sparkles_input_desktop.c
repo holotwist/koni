@@ -1,24 +1,8 @@
 #include "sparkles_input.h"
 #include <string.h>
-#include <math.h>
 
-static inline float v2_dist(Vector2 a, Vector2 b) {
-    float dx = a.x - b.x;
-    float dy = a.y - b.y;
-    return sqrtf(dx * dx + dy * dy);
-}
-
-static float s_hold_timer = 0.0f;
-static bool s_holding = false;
-static Vector2 s_press_pos = {0};
-
-static void desktop_init(void) {
-    s_hold_timer = 0.0f;
-    s_holding = false;
-}
-
-static void desktop_shutdown(void) {
-}
+static void desktop_init(void) {}
+static void desktop_shutdown(void) {}
 
 static void desktop_handle_text_input(void) {
     SparklesTextInputSession *sess = sparkles_input_get_text_session();
@@ -48,40 +32,34 @@ static void desktop_handle_text_input(void) {
 }
 
 static void desktop_update(float dt) {
-    (void)dt;
     Vector2 m = GetMousePosition();
-    float wheel = GetMouseWheelMove();
+    bool is_down = IsMouseButtonDown(MOUSE_BUTTON_LEFT);
 
-    // Route active text ingress
+    sparkles_input_feed_pointer(m, is_down, dt);
+
+    float wheel = GetMouseWheelMove();
+    if (wheel != 0.0f) {
+        // Invert to match standard downward scroll
+        sparkles_input_feed_wheel(-wheel);
+    }
+
+    if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+        sparkles_input_consume_long_press((Rectangle){ 0, 0, 0, 0 }, NULL); // Reset old state
+        // Re-feed as long-press at current coordinates
+        extern bool s_long_press_triggered;
+        s_long_press_triggered = true;
+    }
+
     if (sparkles_input_is_text_active()) {
         desktop_handle_text_input();
         return;
     }
 
-    // Mouse scroll always active
-    if (wheel != 0.0f) {
-        sparkles_input_add_scroll(m, -wheel * 3.0f);
-    }
-
-    // Mouse right-click emits long-press / secondary action
-    if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
-        sparkles_input_emit_long_press(m);
-    }
-
-    // Mouse left-click emits tap immediately on press
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        sparkles_input_emit_tap(m);
-    }
-
-    // Suppress only keyboard shortcuts when text or search is active
     if (sparkles_input_is_text_focused()) {
-        if (IsKeyPressed(KEY_ESCAPE)) {
-            sparkles_input_emit_action(SPARKLES_ACTION_BACK);
-        }
         return;
     }
 
-    // Semantic hotkey translations
+    // Keyboard action mappings
     if (IsKeyPressed(KEY_ESCAPE))   sparkles_input_emit_action(SPARKLES_ACTION_BACK);
     if (IsKeyPressed(KEY_SPACE))    sparkles_input_emit_action(SPARKLES_ACTION_PLAY_PAUSE);
     if (IsKeyPressed(KEY_N))        sparkles_input_emit_action(SPARKLES_ACTION_NEXT);

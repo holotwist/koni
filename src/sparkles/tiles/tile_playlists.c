@@ -61,31 +61,33 @@ void tile_playlists_refresh(void) {
 
 void tile_playlists_render(SparklesTile *tile, Rectangle b) {
     (void)tile;
-    int row_h = 30;
+    float ui_scale = sparkles_get_ui_scale();
+    int row_h = (int)fmaxf(44.0f, 38.0f * ui_scale);
+    float header_top = b.y + (16.0f * ui_scale);
+    float list_start_y = header_top + (float)FONT_SIZE_LG + (14.0f * ui_scale);
+    Vector2 mouse = GetMousePosition();
 
     if (!s_drilldown) {
-        // Overview
-        DrawText("Playlists", (int)(b.x + 18), (int)(b.y + 16), FONT_SIZE_LG, COLOR_TEXT_PRIMARY);
+        DrawText("Playlists", (int)(b.x + 16 * ui_scale), (int)header_top, FONT_SIZE_LG, COLOR_TEXT_PRIMARY);
 
         if (!s_pl_search_active) {
             int search_btn_w = MeasureText("[Search]", FONT_SIZE_SM);
-            DrawText("[Search]", (int)(b.x + b.width - search_btn_w - 20), (int)(b.y + 19), FONT_SIZE_SM, COLOR_ACCENT);
+            DrawText("[Search]", (int)(b.x + b.width - search_btn_w - 16 * ui_scale), (int)header_top + 2, FONT_SIZE_SM, COLOR_ACCENT);
         } else {
             int title_w = MeasureText("Playlists", FONT_SIZE_LG);
-            float sbox_x = b.x + 18 + title_w + 14;
-            float sbox_w = b.width - (sbox_x - b.x) - 44;
+            float sbox_x = b.x + 16 * ui_scale + title_w + 14 * ui_scale;
+            float sbox_w = b.width - (sbox_x - b.x) - (48 * ui_scale);
             if (sbox_w < 60) sbox_w = 60;
-            Rectangle sbox = { sbox_x, b.y + 14, sbox_w, 24 };
+            Rectangle sbox = { sbox_x, header_top - 2, sbox_w, (float)FONT_SIZE_SM * 1.5f };
 
             DrawRectangleRounded(sbox, 0.2f, 4, (Color){ 32, 34, 40, 255 });
             DrawRectangleRoundedLinesEx(sbox, 0.2f, 4, 1.0f, COLOR_ACCENT);
 
             const char *cur = ((int)(GetTime() * 2.5f) % 2 == 0) ? "_" : " ";
             DrawText(TextFormat("/ %s%s", s_pl_search_buf, cur), (int)(sbox.x + 8), (int)(sbox.y + 4), FONT_SIZE_SM, COLOR_TEXT_PRIMARY);
-            DrawText("[x]", (int)(b.x + b.width - 32), (int)(b.y + 18), FONT_SIZE_SM, COLOR_TEXT_MUTED);
+            DrawText("[x]", (int)(b.x + b.width - 32 * ui_scale), (int)header_top + 2, FONT_SIZE_SM, COLOR_TEXT_MUTED);
         }
 
-        // Map filtered playlists
         int filtered[256];
         int count = 0;
         for (int p = 0; p < playlist_mgmt_get_count() && count < 256; p++) {
@@ -95,58 +97,80 @@ void tile_playlists_render(SparklesTile *tile, Rectangle b) {
             }
         }
 
-        int max_rows = (int)(b.height - 56) / row_h;
+        int max_rows = (int)(b.height - (list_start_y - b.y)) / row_h;
         if (s_pl_scroll > count - max_rows) s_pl_scroll = count - max_rows;
         if (s_pl_scroll < 0) s_pl_scroll = 0;
 
         for (int i = 0; i < max_rows && (i + s_pl_scroll) < count; i++) {
             int idx = filtered[i + s_pl_scroll];
-            float y = b.y + 50 + (i * row_h);
+            float y = list_start_y + (i * row_h);
             const PlaylistSummary *ps = playlist_mgmt_get_summary(idx);
             if (!ps) continue;
 
             bool is_active = (current_play_source == SOURCE_PLAYLIST && 
                               strcmp(active_playlist_playback.name, ps->name) == 0);
 
+            Rectangle row_bar = { b.x + 6, y, b.width - 12, (float)row_h - 2.0f };
+            bool is_hover = CheckCollisionPointRec(mouse, row_bar);
+            if (is_hover) {
+                DrawRectangleRec(row_bar, (Color){ 255, 255, 255, 8 });
+            }
+
+            float text_y = y + ((float)row_h - (float)FONT_SIZE_MD) * 0.5f;
             const char *badge = ps->is_favourites ? "*" : ">";
-            DrawText(badge, (int)(b.x + 18), (int)(y + 2), FONT_SIZE_MD, ps->is_favourites ? COLOR_ACCENT : COLOR_TEXT_DARK);
+            Color badge_col = ps->is_favourites ? COLOR_ACCENT : (is_hover ? COLOR_TEXT_PRIMARY : COLOR_TEXT_DARK);
+            DrawText(badge, (int)(b.x + 16 * ui_scale), (int)text_y, FONT_SIZE_MD, badge_col);
 
             const char *cnt_str = TextFormat("%d trks", ps->track_count);
             int cnt_w = MeasureText(cnt_str, FONT_SIZE_SM);
-            float cnt_x = b.x + b.width - cnt_w - 18;
-            DrawText(cnt_str, (int)cnt_x, (int)(y + 3), FONT_SIZE_SM, COLOR_TEXT_MUTED);
+            float cnt_x = b.x + b.width - cnt_w - (16.0f * ui_scale);
+            DrawText(cnt_str, (int)cnt_x, (int)text_y, FONT_SIZE_SM, is_hover ? COLOR_TEXT_PRIMARY : COLOR_TEXT_MUTED);
 
-            float name_w = cnt_x - (b.x + 36) - 10;
+            float name_start_x = b.x + (38.0f * ui_scale);
+            float name_w = cnt_x - name_start_x - (10.0f * ui_scale);
             if (name_w < 30) name_w = 30;
-            Rectangle name_box = { b.x + 36, y + 2, name_w, (float)FONT_SIZE_MD };
-            DrawTextMarquee(ps->name, name_box, b, FONT_SIZE_MD, is_active ? COLOR_ACCENT : COLOR_TEXT_PRIMARY, 28.0f);
+            Rectangle name_box = { name_start_x, text_y, name_w, (float)FONT_SIZE_MD * 1.3f };
+            Color name_col = is_active ? COLOR_ACCENT : (is_hover ? COLOR_TEXT_PRIMARY : ColorAlpha(COLOR_TEXT_PRIMARY, 0.85f));
+            DrawTextMarquee(ps->name, name_box, b, FONT_SIZE_MD, name_col, 28.0f);
         }
     } else {
-        // Drilldown playlist menu
+        // Drilldown playlist view
         int back_w = MeasureText("<- [Back]", FONT_SIZE_MD);
-        DrawText("<- [Back]", (int)(b.x + 18), (int)(b.y + 16), FONT_SIZE_MD, COLOR_ACCENT);
+        Rectangle back_box = { b.x + 12 * ui_scale, header_top - 4, (float)(back_w + 14 * ui_scale), (float)FONT_SIZE_MD * 1.4f };
+        bool hover_back = CheckCollisionPointRec(mouse, back_box);
+        if (hover_back) {
+            DrawRectangleRounded(back_box, 0.2f, 4, (Color){ 255, 255, 255, 12 });
+        }
+        DrawText("<- [Back]", (int)(b.x + 16 * ui_scale), (int)header_top, FONT_SIZE_MD, hover_back ? WHITE : COLOR_ACCENT);
 
-        float pl_title_x = b.x + 18 + back_w + 14;
-        Rectangle pl_title_box = { pl_title_x, b.y + 16, b.width - (pl_title_x - b.x) - 18, (float)FONT_SIZE_LG };
+        float pl_title_x = b.x + 16 * ui_scale + back_w + (14 * ui_scale);
+        Rectangle pl_title_box = { pl_title_x, header_top, b.width - (pl_title_x - b.x) - (16 * ui_scale), (float)FONT_SIZE_LG * 1.3f };
         DrawTextMarquee(s_active_pl_name, pl_title_box, b, FONT_SIZE_LG, COLOR_TEXT_PRIMARY, 24.0f);
 
         int count = s_loaded_pl.count;
-        int max_rows = (int)(b.height - 56) / row_h;
+        int max_rows = (int)(b.height - (list_start_y - b.y)) / row_h;
         if (s_pl_scroll > count - max_rows) s_pl_scroll = count - max_rows;
         if (s_pl_scroll < 0) s_pl_scroll = 0;
 
         if (count == 0) {
-            DrawText("Empty playlist", (int)(b.x + 18), (int)(b.y + 60), FONT_SIZE_SM, COLOR_TEXT_MUTED);
+            DrawText("Empty playlist", (int)(b.x + 16 * ui_scale), (int)(list_start_y + 10), FONT_SIZE_SM, COLOR_TEXT_MUTED);
         }
 
         for (int i = 0; i < max_rows && (i + s_pl_scroll) < count; i++) {
             int idx = i + s_pl_scroll;
-            float y = b.y + 50 + (i * row_h);
+            float y = list_start_y + (i * row_h);
             const PlaylistTrackItem *ti = &s_loaded_pl.items[idx];
 
             bool is_playing = (current_play_source == SOURCE_PLAYLIST && strcmp(playing_filepath, ti->path) == 0);
 
-            DrawText(is_playing ? "||" : ">", (int)(b.x + 18), (int)(y + 2), FONT_SIZE_SM, is_playing ? COLOR_ACCENT : COLOR_TEXT_DARK);
+            Rectangle row_bar = { b.x + 6, y, b.width - 12, (float)row_h - 2.0f };
+            bool is_hover = CheckCollisionPointRec(mouse, row_bar);
+            if (is_hover) {
+                DrawRectangleRec(row_bar, (Color){ 255, 255, 255, 8 });
+            }
+
+            float text_y = y + ((float)row_h - (float)FONT_SIZE_MD) * 0.5f;
+            DrawText(is_playing ? "||" : ">", (int)(b.x + 16 * ui_scale), (int)text_y, FONT_SIZE_SM, is_playing ? COLOR_ACCENT : (is_hover ? COLOR_TEXT_PRIMARY : COLOR_TEXT_DARK));
 
             const char *display_title = (ti->title[0]) ? ti->title : ti->path;
             const char *slash = strrchr(display_title, '/');
@@ -154,20 +178,22 @@ void tile_playlists_render(SparklesTile *tile, Rectangle b) {
 
             const char *dur_str = TextFormat("%u:%02u", ti->duration_sec / 60, ti->duration_sec % 60);
             int dur_w = MeasureText(dur_str, FONT_SIZE_SM);
-            float dur_x = b.x + b.width - dur_w - 18;
-            DrawText(dur_str, (int)dur_x, (int)(y + 3), FONT_SIZE_SM, COLOR_TEXT_DARK);
+            float dur_x = b.x + b.width - dur_w - (16.0f * ui_scale);
+            DrawText(dur_str, (int)dur_x, (int)text_y, FONT_SIZE_SM, is_hover ? COLOR_TEXT_MUTED : COLOR_TEXT_DARK);
 
-            float tit_w = dur_x - (b.x + 36) - 10;
+            float tit_start_x = b.x + (38.0f * ui_scale);
+            float tit_w = dur_x - tit_start_x - (10.0f * ui_scale);
             if (tit_w < 30) tit_w = 30;
-            Rectangle tit_col = { b.x + 36, y + 2, tit_w, (float)FONT_SIZE_MD };
-            DrawTextMarquee(display_title, tit_col, b, FONT_SIZE_MD, is_playing ? COLOR_ACCENT : COLOR_TEXT_PRIMARY, 26.0f);
+            Rectangle tit_col = { tit_start_x, text_y, tit_w, (float)FONT_SIZE_MD * 1.3f };
+            Color text_col = is_playing ? COLOR_ACCENT : (is_hover ? COLOR_TEXT_PRIMARY : ColorAlpha(COLOR_TEXT_PRIMARY, 0.85f));
+            DrawTextMarquee(display_title, tit_col, b, FONT_SIZE_MD, text_col, 26.0f);
         }
     }
 }
 
 void tile_playlists_input(SparklesTile *tile, Rectangle b) {
     (void)tile;
-    Vector2 m = GetMousePosition();
+    if (sparkles_input_is_consumed()) return;
 
     // Text input for playlist search
     if (s_pl_search_active) {
@@ -196,11 +222,16 @@ void tile_playlists_input(SparklesTile *tile, Rectangle b) {
         if (s_pl_scroll < 0) s_pl_scroll = 0;
     }
 
+   float ui_scale = sparkles_get_ui_scale();
+    float header_top = b.y + (16.0f * ui_scale);
+    int row_h = (int)fmaxf(44.0f, 38.0f * ui_scale);
+    float list_start_y = header_top + (float)FONT_SIZE_LG + (14.0f * ui_scale);
+
     // Long-press or right-click context menu
     Vector2 lp;
     if (sparkles_input_consume_long_press(b, &lp)) {
-        if (lp.y >= b.y + 50.0f) {
-            int clicked = s_pl_scroll + (int)(lp.y - (b.y + 50.0f)) / 30;
+        if (lp.y >= list_start_y) {
+            int clicked = s_pl_scroll + (int)(lp.y - list_start_y) / row_h;
             if (!s_drilldown) {
                 int count = 0;
                 for (int p = 0; p < playlist_mgmt_get_count(); p++) {
@@ -244,8 +275,13 @@ void tile_playlists_input(SparklesTile *tile, Rectangle b) {
             return;
         }
 
+        float ui_scale = sparkles_get_ui_scale();
+        float header_top = b.y + (16.0f * ui_scale);
+        int row_h = (int)fmaxf(44.0f, 38.0f * ui_scale);
+        float list_start_y = header_top + (float)FONT_SIZE_LG + (14.0f * ui_scale);
+
         if (!s_drilldown) {
-            int clicked = s_pl_scroll + (int)(tap.y - (b.y + 50)) / 28;
+            int clicked = s_pl_scroll + (int)(tap.y - list_start_y) / row_h;
             int count = 0;
             for (int p = 0; p < playlist_mgmt_get_count(); p++) {
                 const PlaylistSummary *ps = playlist_mgmt_get_summary(p);
@@ -264,14 +300,17 @@ void tile_playlists_input(SparklesTile *tile, Rectangle b) {
                 }
             }
         } else {
-            if (CheckCollisionPointRec(tap, (Rectangle){ b.x + 14, b.y + 12, 90, 30 })) {
+            int back_w = MeasureText("<- [Back]", FONT_SIZE_MD);
+            Rectangle back_hitbox = { b.x + 8.0f * ui_scale, header_top - 6.0f, (float)(back_w + 24.0f * ui_scale), (float)FONT_SIZE_MD * 1.8f };
+
+            if (CheckCollisionPointRec(tap, back_hitbox)) {
                 s_drilldown = false;
                 s_pl_scroll = 0;
                 playlist_mgmt_free_loaded(&s_loaded_pl);
                 return;
             }
 
-            int clicked = s_pl_scroll + (int)(tap.y - (b.y + 50)) / 28;
+            int clicked = s_pl_scroll + (int)(tap.y - list_start_y) / row_h;
             if (clicked >= 0 && clicked < s_loaded_pl.count) {
                 pthread_mutex_lock(&state_mutex);
                 if (active_playlist_playback.paths) {
