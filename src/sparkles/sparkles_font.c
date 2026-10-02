@@ -12,7 +12,13 @@ static char s_font_path[1024] = {0};
 #define BASE_CP_COUNT 190
 #define DYNAMIC_SLOTS 320
 #define TOTAL_GLYPH_CAP (BASE_CP_COUNT + DYNAMIC_SLOTS)
+
+#if defined(__ANDROID__) || defined(PLATFORM_ANDROID)
 #define ATLAS_BASE_SIZE 24
+#else
+// Unifont native 16px bitmap grid
+#define ATLAS_BASE_SIZE 16
+#endif
 
 typedef struct {
     int codepoint;
@@ -77,7 +83,11 @@ static void rebuild_atlas(void) {
 
     Font next_font = LoadFontEx(s_font_path, ATLAS_BASE_SIZE, s_bake_codepoints, total);
     if (next_font.texture.id != 0) {
+#if defined(__ANDROID__) || defined(PLATFORM_ANDROID)
         SetTextureFilter(next_font.texture, TEXTURE_FILTER_BILINEAR);
+#else
+        SetTextureFilter(next_font.texture, TEXTURE_FILTER_POINT);
+#endif
         if (g_sparkles_font.texture.id != 0 && g_sparkles_font.texture.id != GetFontDefault().texture.id) {
             UnloadFont(g_sparkles_font);
         }

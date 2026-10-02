@@ -32,6 +32,10 @@ void sparkles_nav_update(float dt) {
     s_current_x += (s_target_x - s_current_x) * speed;
     s_current_y += (s_target_y - s_current_y) * speed;
 
+    // Snap to rest
+    if (fabsf(s_target_x - s_current_x) < 0.0005f) s_current_x = s_target_x;
+    if (fabsf(s_target_y - s_current_y) < 0.0005f) s_current_y = s_target_y;
+
     if (s_badge_timer > 0.0f) {
         s_badge_timer -= dt;
         if (s_badge_timer < 0.0f) s_badge_timer = 0.0f;

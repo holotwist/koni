@@ -77,18 +77,16 @@ static inline float GetEffectiveFontSize(int fontSize) {
 }
 #else
 // Desktop
-#define FONT_SIZE_XS        15
-#define FONT_SIZE_SM        17
-#define FONT_SIZE_MD        20
-#define FONT_SIZE_LG        25
-#define FONT_SIZE_XL        30
+#define FONT_SIZE_XS        16
+#define FONT_SIZE_SM        16
+#define FONT_SIZE_MD        16
+#define FONT_SIZE_LG        32
+#define FONT_SIZE_XL        32
 
 static inline float GetEffectiveFontSize(int fontSize) {
-    if (fontSize <= 9)  return 14.0f;
-    if (fontSize <= 11) return 15.0f;
-    if (fontSize <= 13) return 16.0f;
-    if (fontSize >= 24) return (float)fontSize;
-    return (float)(int)((float)fontSize * 1.08f);
+    if (fontSize >= 48) return 64.0f;
+    if (fontSize >= 24) return 32.0f;
+    return 16.0f;
 }
 #endif
 
@@ -160,6 +158,9 @@ static inline void DrawTextMarquee(const char *text, Rectangle col, Rectangle ti
     float gap = 48.0f * UI_SCALE;
     float span = (float)tw + gap;
     float shift = fmodf((float)GetTime() * (speed * UI_SCALE), span);
+#if !defined(__ANDROID__) && !defined(PLATFORM_ANDROID)
+    shift = floorf(shift); // Snap marquee to whole pixels
+#endif
 
     BeginScissorMode((int)sx, (int)sy - 2, (int)col.width, (int)effH + 4);
     DrawSparklesText(text, (int)(col.x - shift), (int)col.y, fontSize, color);

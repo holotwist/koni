@@ -4,7 +4,7 @@ Koni is a lightweight, high-performance music player written in C. It includes a
 
 ## Koni - A Music Player
 
-Koni features real-time audio visualizers, synchronized lyrics retrieval, parametric and graphic equalization, studio DSP processing (Krystal engine), desktop integration via MPRIS, ReplayGain, and gapless playback.
+Koni features real-time audio visualizers, synchronized lyrics retrieval, parametric and graphic equalization, integrated audio processing (Krystal engine), desktop integration via MPRIS, ReplayGain, and gapless playback.
 
 ## Features
 

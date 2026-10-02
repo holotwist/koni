@@ -461,7 +461,7 @@ int main(int argc, char **argv) {
         float surface_dim = fminf(0.70f, cur_y * 0.45f);
 
         // Page -2, Playlists
-        float off_pl = (-2.0f - cur_x) * sw;
+        float off_pl = roundf((-2.0f - cur_x) * sw);
         if (fabsf(off_pl) < sw) {
             rlPushMatrix();
             rlTranslatef(off_pl, 0, 0);
@@ -470,7 +470,7 @@ int main(int argc, char **argv) {
         }
 
         // Page -1, Music library
-        float off_lib = (-1.0f - cur_x) * sw;
+        float off_lib = roundf((-1.0f - cur_x) * sw);
         if (fabsf(off_lib) < sw) {
             rlPushMatrix();
             rlTranslatef(off_lib, 0, 0);
@@ -479,7 +479,7 @@ int main(int argc, char **argv) {
         }
 
         // Page 0, Player view
-        float off_player = (0.0f - cur_x) * sw;
+        float off_player = roundf((0.0f - cur_x) * sw);
         if (fabsf(off_player) < sw) {
             rlPushMatrix();
             rlTranslatef(off_player, 0, 0);
