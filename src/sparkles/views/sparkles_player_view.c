@@ -231,9 +231,15 @@ void sparkles_player_view_render(float screen_w, float screen_h) {
         float bottom_pill_y = screen_h - pill_h_calc - (16.0f * ui_scale);
         float scrub_y_calc = bottom_pill_y - (32.0f * ui_scale);
 
-        int font_size_active = is_vertical ? FONT_SIZE_SM : 20;
+        int font_size_active;
+#if defined(__ANDROID__) || defined(PLATFORM_ANDROID)
+        font_size_active = is_vertical ? FONT_SIZE_SM : 20;
+#else
+        // 32px 2x integer scale on desktop
+        font_size_active = FONT_SIZE_LG;
+#endif
         float lrc_h = (float)font_size_active * 1.5f;
-        float lrc_y = is_vertical ? (scrub_y_calc - lrc_h - (8.0f * ui_scale)) : (screen_h - 130.0f);
+        float lrc_y = is_vertical ? (scrub_y_calc - lrc_h - (8.0f * ui_scale)) : (screen_h - 148.0f);
         Rectangle lrc_area = { 20.0f * ui_scale, lrc_y, screen_w - (40.0f * ui_scale), lrc_h };
 
         uint32_t srate = atomic_load(&vis_srate);
@@ -428,30 +434,51 @@ void sparkles_player_view_render(float screen_w, float screen_h) {
         PlayState st = (PlayState)atomic_load(&play_state_atomic);
         draw_minimal_transport(screen_w * 0.5f, screen_h - 38.0f, st == STATE_PLAYING);
 
-        float pill_y = screen_h - 48.0f;
-        float rx = screen_w - 280.0f;
+        float pill_y = screen_h - 46.0f;
+        float pill_h = 26.0f;
+        float rx = screen_w - 264.0f;
+        int pill_font = FONT_SIZE_SM;
 
         if (s_help_enabled) {
             DrawSparklesText("Tab: Songs  |  , : Settings  |  H: Hide Help", (int)rx - 250, (int)pill_y + 4, FONT_SIZE_XS, COLOR_TEXT_MUTED);
         }
 
-        Rectangle l_pill = { rx, pill_y, 28, 22 };
+        // L (Lyrics)
+        Rectangle l_pill = { rx, pill_y, 32, pill_h };
         DrawRectangleRec(l_pill, s_lyrics_enabled ? ColorAlpha(l_indicator_col, 0.22f) : (Color){ 12, 13, 16, 255 });
-        DrawSparklesText("L", (int)l_pill.x + 9, (int)l_pill.y + 4, 12, s_lyrics_enabled ? l_indicator_col : COLOR_TEXT_DARK);
+        DrawRectangleLinesEx(l_pill, 1.0f, s_lyrics_enabled ? l_indicator_col : (Color){ 28, 30, 38, 255 });
+        int tw_l = MeasureSparklesText("L", pill_font);
+        DrawSparklesText("L", (int)(l_pill.x + (l_pill.width - tw_l) * 0.5f), (int)(l_pill.y + (l_pill.height - pill_font) * 0.5f), pill_font, s_lyrics_enabled ? l_indicator_col : COLOR_TEXT_DARK);
 
-        Rectangle r_pill = { rx + 34, pill_y, 28, 22 };
+        // R (Repeat)
+        Rectangle r_pill = { rx + 40, pill_y, 32, pill_h };
         DrawRectangleRec(r_pill, r_mode != REPEAT_OFF ? ColorAlpha(COLOR_ACCENT, 0.2f) : (Color){ 12, 13, 16, 255 });
-        DrawSparklesText(r_mode == REPEAT_ONE ? "1" : "R", (int)r_pill.x + 9, (int)r_pill.y + 4, 12, r_mode != REPEAT_OFF ? COLOR_ACCENT : COLOR_TEXT_DARK);
+        DrawRectangleLinesEx(r_pill, 1.0f, r_mode != REPEAT_OFF ? COLOR_ACCENT : (Color){ 28, 30, 38, 255 });
+        const char *r_txt = (r_mode == REPEAT_ONE ? "1" : "R");
+        int tw_r = MeasureSparklesText(r_txt, pill_font);
+        DrawSparklesText(r_txt, (int)(r_pill.x + (r_pill.width - tw_r) * 0.5f), (int)(r_pill.y + (r_pill.height - pill_font) * 0.5f), pill_font, r_mode != REPEAT_OFF ? COLOR_ACCENT : COLOR_TEXT_DARK);
 
-        Rectangle s_pill = { rx + 68, pill_y, 28, 22 };
+        // S (Shuffle)
+        Rectangle s_pill = { rx + 80, pill_y, 32, pill_h };
         DrawRectangleRec(s_pill, shuf ? ColorAlpha(COLOR_ACCENT, 0.2f) : (Color){ 12, 13, 16, 255 });
-        DrawSparklesText("S", (int)s_pill.x + 9, (int)s_pill.y + 4, 12, shuf ? COLOR_ACCENT : COLOR_TEXT_DARK);
+        DrawRectangleLinesEx(s_pill, 1.0f, shuf ? COLOR_ACCENT : (Color){ 28, 30, 38, 255 });
+        int tw_s = MeasureSparklesText("S", pill_font);
+        DrawSparklesText("S", (int)(s_pill.x + (s_pill.width - tw_s) * 0.5f), (int)(s_pill.y + (s_pill.height - pill_font) * 0.5f), pill_font, shuf ? COLOR_ACCENT : COLOR_TEXT_DARK);
 
-        Rectangle rg_pill = { rx + 102, pill_y, 34, 22 };
+        // RG (ReplayGain)
+        Rectangle rg_pill = { rx + 120, pill_y, 42, pill_h };
         DrawRectangleRec(rg_pill, eff_rgain != 0 ? ColorAlpha(COLOR_ACCENT, 0.2f) : (Color){ 12, 13, 16, 255 });
-        DrawSparklesText(rg_text, (int)rg_pill.x + 6, (int)rg_pill.y + 4, 12, eff_rgain != 0 ? COLOR_ACCENT : COLOR_TEXT_DARK);
+        DrawRectangleLinesEx(rg_pill, 1.0f, eff_rgain != 0 ? COLOR_ACCENT : (Color){ 28, 30, 38, 255 });
+        int tw_rg = MeasureSparklesText(rg_text, pill_font);
+        DrawSparklesText(rg_text, (int)(rg_pill.x + (rg_pill.width - tw_rg) * 0.5f), (int)(rg_pill.y + (rg_pill.height - pill_font) * 0.5f), pill_font, eff_rgain != 0 ? COLOR_ACCENT : COLOR_TEXT_DARK);
 
-        DrawSparklesText(TextFormat("%d%%", vol), (int)rx + 144, (int)pill_y + 4, FONT_SIZE_SM, vol > 0 ? COLOR_TEXT_MUTED : COLOR_ACCENT);
+        // Volume
+        Rectangle vol_pill = { rx + 170, pill_y, 58, pill_h };
+        DrawRectangleRec(vol_pill, (Color){ 12, 13, 16, 255 });
+        DrawRectangleLinesEx(vol_pill, 1.0f, (Color){ 28, 30, 38, 255 });
+        const char *v_str = TextFormat("%d%%", vol);
+        int tw_v = MeasureSparklesText(v_str, pill_font);
+        DrawSparklesText(v_str, (int)(vol_pill.x + (vol_pill.width - tw_v) * 0.5f), (int)(vol_pill.y + (vol_pill.height - pill_font) * 0.5f), pill_font, vol > 0 ? COLOR_TEXT_MUTED : COLOR_ACCENT);
     }
 }
 
@@ -594,8 +621,9 @@ void sparkles_player_view_input(float screen_w, float screen_h) {
         }
     } else {
         // Horizontal widescreen desktop layout clicks
-        float pill_y = screen_h - 48.0f;
-        float rx = screen_w - 280.0f;
+        float pill_y = screen_h - 46.0f;
+        float pill_h = 26.0f;
+        float rx = screen_w - 264.0f;
 
         float t_cx = screen_w * 0.5f;
         float t_cy = screen_h - 38.0f;
@@ -603,11 +631,11 @@ void sparkles_player_view_input(float screen_w, float screen_h) {
         Rectangle btn_play = { t_cx - 20.0f, t_cy - 20.0f, 40.0f, 40.0f };
         Rectangle btn_next = { t_cx + 22.0f, t_cy - 18.0f, 36.0f, 36.0f };
 
-        Rectangle l_rect   = { rx,        pill_y, 28, 22 };
-        Rectangle r_rect   = { rx + 34,   pill_y, 28, 22 };
-        Rectangle s_rect   = { rx + 68,   pill_y, 28, 22 };
-        Rectangle rg_rect  = { rx + 102,  pill_y, 34, 22 };
-        Rectangle vol_rect = { rx + 144,  pill_y, 45, 22 };
+        Rectangle l_rect   = { rx,        pill_y, 32, pill_h };
+        Rectangle r_rect   = { rx + 40,   pill_y, 32, pill_h };
+        Rectangle s_rect   = { rx + 80,   pill_y, 32, pill_h };
+        Rectangle rg_rect  = { rx + 120,  pill_y, 42, pill_h };
+        Rectangle vol_rect = { rx + 170,  pill_y, 58, pill_h };
 
         if (sparkles_input_consume_tap(btn_prev, NULL)) {
             atomic_store(&current_cmd_atomic, CMD_PREV);

@@ -5,29 +5,42 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 Font g_sparkles_font = {0};
 static char s_font_path[1024] = {0};
 
-#define BASE_CP_COUNT 190
-#define DYNAMIC_SLOTS 320
-#define TOTAL_GLYPH_CAP (BASE_CP_COUNT + DYNAMIC_SLOTS)
+#define BASE_CP_MAX 256
+#define PENDING_MAX 256
+#define GLYPH_TTL_FRAMES (30 * 60) // 30s at 60 FPS
 
 #if defined(__ANDROID__) || defined(PLATFORM_ANDROID)
 #define ATLAS_BASE_SIZE 24
+#define DYNAMIC_SLOTS   2048
+#define HIGH_WATERMARK  1024
 #else
-// Unifont native 16px bitmap grid
-#define ATLAS_BASE_SIZE 16
+// 64px 4x supersampling with 16/32/64px mip levels
+#define ATLAS_BASE_SIZE 64
+#define DYNAMIC_SLOTS   768
+#define HIGH_WATERMARK  512
 #endif
+
+#define TOTAL_GLYPH_CAP (BASE_CP_MAX + DYNAMIC_SLOTS)
 
 typedef struct {
     int codepoint;
     uint32_t last_used_frame;
 } DynamicGlyph;
 
-static int s_base_codepoints[BASE_CP_COUNT];
+static int s_base_codepoints[BASE_CP_MAX];
+static int s_base_count = 0;
+
 static DynamicGlyph s_dynamic_glyphs[DYNAMIC_SLOTS];
 static int s_dynamic_count = 0;
+
+static int s_pending_codepoints[PENDING_MAX];
+static int s_pending_count = 0;
+
 static int s_bake_codepoints[TOTAL_GLYPH_CAP];
 static uint32_t s_frame_counter = 0;
 
@@ -64,17 +77,56 @@ static bool find_font_file(char *out_path, size_t sz) {
 }
 
 static void init_base_set(void) {
-    int idx = 0;
-    for (int c = 32; c <= 126; c++) s_base_codepoints[idx++] = c;
-    for (int c = 160; c <= 255; c++) s_base_codepoints[idx++] = c;
-    s_base_codepoints[idx++] = 0x25B6; // Play symbol
+    s_base_count = 0;
+    // Standard ASCII
+    for (int c = 32; c <= 126; c++) s_base_codepoints[s_base_count++] = c;
+    // Latin-1 Supplement (includes °, ·)
+    for (int c = 160; c <= 255; c++) s_base_codepoints[s_base_count++] = c;
+
+    // Essential UI glyphs
+    static const int ui_symbols[] = {
+        0x25B6, // ▶ Play
+        0x2605, // ★ Star filled
+        0x2606, // ☆ Star outline
+        0x25BE, // ▾ Down triangle
+        0x2715, // ✕ Close X
+        0x2922, // ⤢ Arena arrow
+        0x2190, // ← Left
+        0x2191, // ↑ Up
+        0x2192, // → Right
+        0x2193, // ↓ Down
+        0x2026, // … Ellipsis
+        0x2014, // — Em dash
+        0x2018, // ‘
+        0x2019, // ’
+        0x201C, // “
+        0x201D  // ”
+    };
+    for (size_t i = 0; i < sizeof(ui_symbols)/sizeof(ui_symbols[0]); i++) {
+        if (s_base_count < BASE_CP_MAX) s_base_codepoints[s_base_count++] = ui_symbols[i];
+    }
+}
+
+static inline bool is_base_codepoint(int cp) {
+    if ((cp >= 32 && cp <= 126) || (cp >= 160 && cp <= 255)) return true;
+    for (int i = 191; i < s_base_count; i++) {
+        if (s_base_codepoints[i] == cp) return true;
+    }
+    return false;
+}
+
+static inline int find_dynamic_glyph(int cp) {
+    for (int i = 0; i < s_dynamic_count; i++) {
+        if (s_dynamic_glyphs[i].codepoint == cp) return i;
+    }
+    return -1;
 }
 
 static void rebuild_atlas(void) {
     if (!s_font_path[0]) return;
 
     int total = 0;
-    for (int i = 0; i < BASE_CP_COUNT; i++) {
+    for (int i = 0; i < s_base_count; i++) {
         s_bake_codepoints[total++] = s_base_codepoints[i];
     }
     for (int i = 0; i < s_dynamic_count; i++) {
@@ -86,7 +138,9 @@ static void rebuild_atlas(void) {
 #if defined(__ANDROID__) || defined(PLATFORM_ANDROID)
         SetTextureFilter(next_font.texture, TEXTURE_FILTER_BILINEAR);
 #else
-        SetTextureFilter(next_font.texture, TEXTURE_FILTER_POINT);
+        // Generate mipmaps
+        GenTextureMipmaps(&next_font.texture);
+        SetTextureFilter(next_font.texture, TEXTURE_FILTER_TRILINEAR);
 #endif
         if (g_sparkles_font.texture.id != 0 && g_sparkles_font.texture.id != GetFontDefault().texture.id) {
             UnloadFont(g_sparkles_font);
@@ -95,9 +149,83 @@ static void rebuild_atlas(void) {
     }
 }
 
+void sparkles_font_touch_text(const char *text) {
+    if (!text || !text[0]) return;
+
+    // Fast skip for ASCII
+    bool has_non_ascii = false;
+    for (const unsigned char *p = (const unsigned char*)text; *p; p++) {
+        if (*p >= 128) { has_non_ascii = true; break; }
+    }
+    if (!has_non_ascii) return;
+
+    const char *ptr = text;
+    while (*ptr) {
+        int cpSize = 0;
+        int cp = GetCodepointNext(ptr, &cpSize);
+        ptr += cpSize;
+
+        if (cp < 128 || is_base_codepoint(cp)) continue;
+
+        int idx = find_dynamic_glyph(cp);
+        if (idx != -1) {
+            s_dynamic_glyphs[idx].last_used_frame = s_frame_counter;
+        } else {
+            // Queue for next frame bake
+            bool already_pending = false;
+            for (int k = 0; k < s_pending_count; k++) {
+                if (s_pending_codepoints[k] == cp) { already_pending = true; break; }
+            }
+            if (!already_pending && s_pending_count < PENDING_MAX) {
+                s_pending_codepoints[s_pending_count++] = cp;
+            }
+        }
+    }
+}
+
+void sparkles_font_update(void) {
+    s_frame_counter++;
+    bool needs_rebuild = false;
+
+    // LRU eviction when cache exceeds high watermark
+    if (s_dynamic_count > HIGH_WATERMARK) {
+        int write_idx = 0;
+        for (int i = 0; i < s_dynamic_count; i++) {
+            if (s_frame_counter - s_dynamic_glyphs[i].last_used_frame <= GLYPH_TTL_FRAMES) {
+                s_dynamic_glyphs[write_idx++] = s_dynamic_glyphs[i];
+            }
+        }
+        if (write_idx != s_dynamic_count) {
+            s_dynamic_count = write_idx;
+            needs_rebuild = true;
+        }
+    }
+
+    // Append intercepted on-screen glyphs
+    if (s_pending_count > 0) {
+        for (int k = 0; k < s_pending_count; k++) {
+            int cp = s_pending_codepoints[k];
+            if (find_dynamic_glyph(cp) == -1) {
+                if (s_dynamic_count < DYNAMIC_SLOTS) {
+                    s_dynamic_glyphs[s_dynamic_count].codepoint = cp;
+                    s_dynamic_glyphs[s_dynamic_count].last_used_frame = s_frame_counter;
+                    s_dynamic_count++;
+                    needs_rebuild = true;
+                }
+            }
+        }
+        s_pending_count = 0;
+    }
+
+    if (needs_rebuild) {
+        rebuild_atlas();
+    }
+}
+
 void sparkles_font_init(void) {
     s_frame_counter = 0;
     s_dynamic_count = 0;
+    s_pending_count = 0;
     memset(s_dynamic_glyphs, 0, sizeof(s_dynamic_glyphs));
 
     init_base_set();
@@ -110,65 +238,11 @@ void sparkles_font_init(void) {
 }
 
 void sparkles_font_scan_library(void) {
-    // Glyphs are pulled ondemand
+    // Intercepted on-demand
 }
 
 void sparkles_font_load_for_text(const char *text) {
-    if (!s_font_path[0] || !text || !text[0]) return;
-    s_frame_counter++;
-
-    int count = 0;
-    int *cps = LoadCodepoints(text, &count);
-    if (!cps || count == 0) return;
-
-    bool needs_rebuild = false;
-
-    for (int i = 0; i < count; i++) {
-        int cp = cps[i];
-        if (cp < 32) continue;
-
-        bool is_base = false;
-        for (int b = 0; b < BASE_CP_COUNT; b++) {
-            if (s_base_codepoints[b] == cp) { is_base = true; break; }
-        }
-        if (is_base) continue;
-
-        int found_idx = -1;
-        for (int d = 0; d < s_dynamic_count; d++) {
-            if (s_dynamic_glyphs[d].codepoint == cp) {
-                found_idx = d;
-                break;
-            }
-        }
-
-        if (found_idx != -1) {
-            s_dynamic_glyphs[found_idx].last_used_frame = s_frame_counter;
-        } else {
-            if (s_dynamic_count < DYNAMIC_SLOTS) {
-                s_dynamic_glyphs[s_dynamic_count].codepoint = cp;
-                s_dynamic_glyphs[s_dynamic_count].last_used_frame = s_frame_counter;
-                s_dynamic_count++;
-            } else {
-                int oldest_idx = 0;
-                uint32_t oldest_frame = s_dynamic_glyphs[0].last_used_frame;
-                for (int d = 1; d < DYNAMIC_SLOTS; d++) {
-                    if (s_dynamic_glyphs[d].last_used_frame < oldest_frame) {
-                        oldest_frame = s_dynamic_glyphs[d].last_used_frame;
-                        oldest_idx = d;
-                    }
-                }
-                s_dynamic_glyphs[oldest_idx].codepoint = cp;
-                s_dynamic_glyphs[oldest_idx].last_used_frame = s_frame_counter;
-            }
-            needs_rebuild = true;
-        }
-    }
-
-    UnloadCodepoints(cps);
-
-    if (needs_rebuild) {
-        rebuild_atlas();
-    }
+    sparkles_font_touch_text(text);
 }
 
 void sparkles_font_unload(void) {

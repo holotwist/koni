@@ -76,22 +76,22 @@ static inline float GetEffectiveFontSize(int fontSize) {
     return (float)(int)((float)fontSize);
 }
 #else
-// Desktop
-#define FONT_SIZE_XS        16
-#define FONT_SIZE_SM        16
-#define FONT_SIZE_MD        16
-#define FONT_SIZE_LG        32
-#define FONT_SIZE_XL        32
+// Desktop sizes (18-21px lists, 28px headings, 34px title)
+#define FONT_SIZE_XS        15
+#define FONT_SIZE_SM        18
+#define FONT_SIZE_MD        21
+#define FONT_SIZE_LG        28
+#define FONT_SIZE_XL        34
 
 static inline float GetEffectiveFontSize(int fontSize) {
-    if (fontSize >= 48) return 64.0f;
-    if (fontSize >= 24) return 32.0f;
-    return 16.0f;
+    return (float)fontSize;
 }
 #endif
 
 extern Font g_sparkles_font;
 void sparkles_font_init(void);
+void sparkles_font_update(void);
+void sparkles_font_touch_text(const char *text);
 void sparkles_font_scan_library(void);
 void sparkles_font_load_for_text(const char *extra_text);
 void sparkles_font_unload(void);
@@ -108,6 +108,7 @@ static inline float GetFontSpacing(float effSize) {
 
 static inline int MeasureSparklesText(const char *text, int fontSize) {
     if (!text || !text[0]) return 0;
+    sparkles_font_touch_text(text);
     float effSize = GetEffectiveFontSize(fontSize);
     float spacing = GetFontSpacing(effSize);
     if (g_sparkles_font.texture.id != 0) {
@@ -118,12 +119,14 @@ static inline int MeasureSparklesText(const char *text, int fontSize) {
 
 static inline void DrawSparklesText(const char *text, int posX, int posY, int fontSize, Color color) {
     if (!text || !text[0]) return;
+    sparkles_font_touch_text(text);
     float effSize = GetEffectiveFontSize(fontSize);
     float spacing = GetFontSpacing(effSize);
+    Vector2 pos = { (float)posX, (float)posY };
     if (g_sparkles_font.texture.id != 0) {
-        DrawTextEx(g_sparkles_font, text, (Vector2){ (float)posX, (float)posY }, effSize, spacing, color);
+        DrawTextEx(g_sparkles_font, text, pos, effSize, spacing, color);
     } else {
-        DrawTextEx(GetFontDefault(), text, (Vector2){ (float)posX, (float)posY }, effSize, spacing, color);
+        DrawTextEx(GetFontDefault(), text, pos, effSize, spacing, color);
     }
 }
 

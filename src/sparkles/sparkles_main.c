@@ -255,6 +255,10 @@ int main(int argc, char **argv) {
     while (!WindowShouldClose()) {
         float dt = GetFrameTime();
 
+        // Process deferred glyph additions
+        // 30s LRU eviction
+        sparkles_font_update();
+
         bool is_searching = tile_song_list_is_searching() || tile_playlists_is_searching() ||
                             sparkles_radial_list_is_open() || sparkles_input_is_text_active() ||
                             sparkles_text_prompt_is_open() || s_show_quit_modal;
