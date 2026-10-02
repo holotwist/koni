@@ -35,6 +35,7 @@ void sparkles_vis_init(void) {
     } else {
         s_vis_mode = VIS_DANCER;
     }
+    if (s_vis_mode == VIS_DANCER) vis_dancer_reset_watermark();
     s_badge_timer = 0.0f;
     s_peak_tracker = 0.25f;
     memset(s_smooth_bins, 0, sizeof(s_smooth_bins));
@@ -44,10 +45,14 @@ void sparkles_vis_cycle(void) {
     s_vis_mode = (s_vis_mode + 1) % VIS_MODE_COUNT;
     current_vis_mode = (int)s_vis_mode; // Save to persistent state
     s_badge_timer = 2.0f; // Display mode badge for 2 seconds on change
+    if (s_vis_mode == VIS_DANCER) vis_dancer_reset_watermark();
 }
 
 void sparkles_vis_set_mode(SparklesVisMode mode) {
     if (mode >= 0 && mode < VIS_MODE_COUNT) {
+        if (s_vis_mode != mode && mode == VIS_DANCER) {
+            vis_dancer_reset_watermark();
+        }
         s_vis_mode = mode;
         current_vis_mode = (int)mode;
         s_badge_timer = 2.0f;

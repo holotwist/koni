@@ -123,6 +123,11 @@ typedef struct {
 static StageSpark s_sparks[MAX_SPARKS];
 static Spotlight  s_spots[NUM_SPOTLIGHTS];
 static bool s_inited = false;
+static float s_watermark_timer = 5.0f;
+
+void vis_dancer_reset_watermark(void) {
+    s_watermark_timer = 5.0f;
+}
 
 // Helper functions
 static void DrawPolyStroke(const Vector2* pts, int count, float thick, Color c) {
@@ -970,31 +975,38 @@ void vis_dancer_render(Rectangle b, float dt) {
     rlPopMatrix(); // Pop root hip/torso matrix
     rlPopMatrix(); // Pop master spin matrix
 
-    // Watermark and artist attribution
-    const char *prefix_str = "original character Koni, style based on work by ";
-    const char *user_str = "@takawoyu";
+    // Watermark timer
+    if (s_watermark_timer > 0.0f) {
+        s_watermark_timer -= dt;
+        if (s_watermark_timer < 0.0f) s_watermark_timer = 0.0f;
 
-    int pre_w = MeasureSparklesText(prefix_str, 10);
-    int user_w = MeasureSparklesText(user_str, 10);
-    int total_w = pre_w + user_w;
+        float wm_alpha = (s_watermark_timer < 1.0f) ? s_watermark_timer : 1.0f;
 
-    float tag_x = b.x + (b.width - total_w) * 0.5f;
-    float tag_y = b.y + b.height - 18.0f;
+        const char *prefix_str = "original character Koni, style based on work by ";
+        const char *user_str = "@takawoyu";
 
-    DrawSparklesText(prefix_str, (int)tag_x, (int)tag_y, 10, ColorAlpha(COLOR_TEXT_DARK, 0.75f));
+        int pre_w = MeasureSparklesText(prefix_str, 10);
+        int user_w = MeasureSparklesText(user_str, 10);
+        int total_w = pre_w + user_w;
 
-    Rectangle user_rect = { tag_x + pre_w, tag_y - 2.0f, (float)user_w, 14.0f };
-    Vector2 mouse = GetMousePosition();
-    bool is_hover = CheckCollisionPointRec(mouse, user_rect);
+        float tag_x = b.x + (b.width - total_w) * 0.5f;
+        float tag_y = b.y + b.height - 18.0f;
 
-    Color user_col = is_hover ? COLOR_CYAN : ColorAlpha(COLOR_TEXT_MUTED, 0.85f);
-    DrawSparklesText(user_str, (int)(tag_x + pre_w), (int)tag_y, 10, user_col);
+        DrawSparklesText(prefix_str, (int)tag_x, (int)tag_y, 10, ColorAlpha(COLOR_TEXT_DARK, 0.75f * wm_alpha));
 
-    if (is_hover) {
-        DrawLineEx((Vector2){ tag_x + pre_w, tag_y + 11.0f },
-                   (Vector2){ tag_x + total_w, tag_y + 11.0f }, 1.0f, COLOR_CYAN);
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            OpenURL("https://x.com/takawoyu");
+        Rectangle user_rect = { tag_x + pre_w, tag_y - 2.0f, (float)user_w, 14.0f };
+        Vector2 mouse = GetMousePosition();
+        bool is_hover = CheckCollisionPointRec(mouse, user_rect);
+
+        Color user_col = is_hover ? ColorAlpha(COLOR_CYAN, wm_alpha) : ColorAlpha(COLOR_TEXT_MUTED, 0.85f * wm_alpha);
+        DrawSparklesText(user_str, (int)(tag_x + pre_w), (int)tag_y, 10, user_col);
+
+        if (is_hover) {
+            DrawLineEx((Vector2){ tag_x + pre_w, tag_y + 11.0f },
+                       (Vector2){ tag_x + total_w, tag_y + 11.0f }, 1.0f, ColorAlpha(COLOR_CYAN, wm_alpha));
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                OpenURL("https://x.com/takawoyu");
+            }
         }
     }
 }

@@ -25,6 +25,7 @@ typedef enum {
 
 void sparkles_vis_init(void);
 void sparkles_vis_cycle(void);
+void vis_dancer_reset_watermark(void);
 void sparkles_vis_set_mode(SparklesVisMode mode);
 SparklesVisMode sparkles_vis_get_mode(void);
 const char* sparkles_vis_get_name(SparklesVisMode mode);
