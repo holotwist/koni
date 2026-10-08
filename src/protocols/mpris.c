@@ -398,7 +398,11 @@ static DBusHandlerResult mpris_handle_methods(DBusConnection *conn, DBusMessage 
         dbus_int64_t offset_us;
         if (dbus_message_get_args(msg, NULL, DBUS_TYPE_INT64, &offset_us, DBUS_TYPE_INVALID))
         {
-            int base_ms = (atomic_load(&current_cmd_atomic) == CMD_SEEK) ? atomic_load(&seek_target_ms) : (atomic_load(&p_current_sec) * 1000);
+            uint32_t srate = atomic_load(&vis_srate);
+            if (srate == 0) srate = 44100;
+            int base_ms = (atomic_load(&current_cmd_atomic) == CMD_SEEK) ? 
+                          atomic_load(&seek_target_ms) : 
+                          (int)(((uint64_t)atomic_load(&p_frames_consumed) * 1000ULL) / srate);
             int t_ms = base_ms + (offset_us / 1000LL);
             int tot_ms = atomic_load(&p_total_sec) * 1000;
             if (t_ms > tot_ms) t_ms = tot_ms - 1000;
@@ -640,6 +644,16 @@ static DBusHandlerResult mpris_handle_methods(DBusConnection *conn, DBusMessage 
             dbus_bool_t shuf_val = atomic_load(&play_mode_shuffle) ? TRUE : FALSE;
             dbus_message_iter_append_basic(&variant, DBUS_TYPE_BOOLEAN, &shuf_val);
             dbus_message_iter_close_container(&dict_entry, &variant);
+            dbus_message_iter_close_container(&array, &dict_entry);
+
+            // Position
+            dbus_message_iter_open_container(&array, DBUS_TYPE_DICT_ENTRY, NULL, &dict_entry);
+            const char *pos_key = "Position";
+            dbus_message_iter_append_basic(&dict_entry, DBUS_TYPE_STRING, &pos_key);
+            uint32_t srate = atomic_load(&vis_srate);
+            if (srate == 0) srate = 44100;
+            int64_t pos_us = ((int64_t)atomic_load(&p_frames_consumed) * 1000000LL) / srate;
+            append_variant_int64(&dict_entry, pos_us);
             dbus_message_iter_close_container(&array, &dict_entry);
         }
         else if (strcmp(interface, "org.mpris.MediaPlayer2") == 0)
