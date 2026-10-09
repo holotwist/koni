@@ -10,6 +10,7 @@ const char* get_vis_mode_name(int mode) {
     if (mode == 1) return "Oscilloscope";
     if (mode == 2) return "Ellipse";
     if (mode == 3) return "Lissajous";
+    if (mode == 4) return "Koni!";
     return "Unknown";
 }
 
@@ -62,6 +63,7 @@ void draw_vis_panel(int y, int x, int h, int w) {
         else if (current_vis_mode == 1) draw_vis_oscilloscope(y + 2, x + 2, draw_w, draw_h);
         else if (current_vis_mode == 2) draw_vis_ellipse(y + 2, x + 2, draw_w, draw_h);
         else if (current_vis_mode == 3) draw_vis_lissajous(y + 2, x + 2, draw_w, draw_h);
+        else if (current_vis_mode == 4) draw_vis_dancer(y + 2, x + 2, draw_w, draw_h);
         
     } else if (active_tab == 2) {
         for (int gy = 0; gy < draw_h; gy++) mvhline(y + 2 + gy, x + 2, ' ', draw_w);

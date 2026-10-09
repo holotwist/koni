@@ -324,6 +324,8 @@ add_executable(koni
     src/ui/visualizers/vis_oscilloscope.c
     src/ui/visualizers/vis_ellipse.c
     src/ui/visualizers/vis_lissajous.c
+    src/ui/visualizers/dancer_physics.c
+    src/ui/visualizers/vis_dancer.c
     src/ui/ui_player.c
     src/ui/ui_input.c
     src/ui/ui.c

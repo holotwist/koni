@@ -11,18 +11,25 @@
 #include <ncurses.h>
 
 static uint8_t *grid = NULL;
+static uint8_t *color_grid = NULL;
 static uint16_t *last_grid = NULL;
 static float *radial_dist_lut = NULL;
 static int last_draw_w = 0, last_draw_h = 0;
 static const int radial_colors[6] = {6, 7, 8, 9, 5, 10};
 
+uint8_t* vis_renderer_get_color_grid(void) {
+    return color_grid;
+}
+
 uint8_t* vis_renderer_begin(int draw_w, int draw_h) {
     if (draw_w != last_draw_w || draw_h != last_draw_h) {
         if (grid) free(grid);
+        if (color_grid) free(color_grid);
         if (last_grid) free(last_grid);
         if (radial_dist_lut) free(radial_dist_lut);
         
         grid = calloc((size_t)(draw_w * draw_h), sizeof(uint8_t));
+        color_grid = calloc((size_t)(draw_w * draw_h), sizeof(uint8_t));
         // Upgrade to uint16_t to allow a dirty state
         last_grid = malloc((size_t)(draw_w * draw_h) * sizeof(uint16_t));
         radial_dist_lut = malloc((size_t)(draw_w * draw_h) * sizeof(float));
@@ -42,6 +49,7 @@ uint8_t* vis_renderer_begin(int draw_w, int draw_h) {
         last_draw_w = draw_w; last_draw_h = draw_h;
     } else {
         memset(grid, 0, (size_t)(draw_w * draw_h));
+        memset(color_grid, 0, (size_t)(draw_w * draw_h));
     }
 
     if (vis_needs_full_redraw && last_grid) {
@@ -63,35 +71,37 @@ void vis_renderer_end(int y, int x, int draw_w, int draw_h, VisColorStrategy col
             int idx = row_offset + gx;
             uint8_t v = grid[idx];
 
-            if (v != last_grid[idx]) {
-                move(y + gy, x + gx);
+            int color_idx = 6;
+            int attr = A_NORMAL;
 
+            if (color_strat == VIS_COLOR_CUSTOM) {
+                color_idx = color_grid[idx] ? (int)color_grid[idx] : 5;
+                attr = (color_idx == 2 || color_idx == 4) ? A_BOLD : A_NORMAL;
+            } else if (color_strat == VIS_COLOR_COLUMN) {
+                color_idx = 6 + (gx * 5) / draw_w;
+                if (color_idx > 10) color_idx = 10;
+                if (color_idx < 6) color_idx = 6;
+            } else if (color_strat == VIS_COLOR_RADIAL) {
+                float dist = radial_dist_lut[idx];
+                int c_idx = (int)((dist / max_radius) * 6.0f);
+                if (c_idx > 5) c_idx = 5;
+                if (c_idx < 0) c_idx = 0;
+                color_idx = radial_colors[c_idx];
+                attr = (dist > max_radius * 0.3f) ? A_BOLD : A_NORMAL;
+            }
+
+            uint16_t cell_hash = (v == 0) ? 0 : (uint16_t)(v | (color_idx << 8));
+            if (cell_hash != last_grid[idx]) {
+                move(y + gy, x + gx);
                 if (v == 0) {
                     addch(' ');
                 } else {
-                    int color_idx = 6;
-                    int attr = A_NORMAL;
-
-                    if (color_strat == VIS_COLOR_COLUMN) {
-                        color_idx = 6 + (gx * 5) / draw_w;
-                        if (color_idx > 10) color_idx = 10;
-                        if (color_idx < 6) color_idx = 6;
-                    } else if (color_strat == VIS_COLOR_RADIAL) {
-                        float dist = radial_dist_lut[idx];
-                        
-                        int c_idx = (int)((dist / max_radius) * 6.0f);
-                        if (c_idx > 5) c_idx = 5;
-                        if (c_idx < 0) c_idx = 0;
-                        color_idx = radial_colors[c_idx];
-                        attr = (dist > max_radius * 0.3f) ? A_BOLD : A_NORMAL;
-                    }
-
                     wchar_t wch[2] = { (wchar_t)(0x2800 + v), L'\0' };
                     cchar_t cch;
                     setcchar(&cch, wch, attr, color_idx, NULL);
                     add_wch(&cch);
                 }
-                last_grid[idx] = v;
+                last_grid[idx] = cell_hash;
             }
         }
     }

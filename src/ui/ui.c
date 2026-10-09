@@ -151,20 +151,23 @@ static int get_help_bar_lines(int max_x) {
 }
 
 static int ui_calculate_refresh_interval_ms(void) {
-    // If stopped or paused, audio is static, no need for high frame rates
+    bool vis_active = show_visualizer && (active_tab == 1) &&
+                      (is_fullscreen || (!ui_eq_is_active() && !ui_krystal_is_active()));
+
+    // Keep framerate for Koni (dancer) animation
+    if (vis_active && current_vis_mode == 4) {
+        return 25;
+    }
+
     PlayState state = (PlayState)atomic_load(&play_state_atomic);
     if (state != STATE_PLAYING) {
-        return 250; // 4 FPS idle
+        return 250;
     }
 
-    // When playing, check if visualizer is being rendered
-    bool vis_active = show_visualizer && (active_tab == 1);
     if (!vis_active) {
-        // Lyrics, Tracker, or browser with visualizer toggled off ('v')
-        return 100; // 10 FPS is optimal for marquee scrolling and time updates
+        return 100;
     }
 
-    // Active visualizer rendering, 40 FPS
     return 25;
 }
 

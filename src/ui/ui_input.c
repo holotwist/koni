@@ -779,7 +779,7 @@ bool ui_handle_input(int ch) {
             break;
 
         case ACTION_VIS_MODE:
-            if (active_tab == 1) current_vis_mode = (current_vis_mode + 1) % 4;
+            if (active_tab == 1) current_vis_mode = (current_vis_mode + 1) % 5;
             break;
 
         case ACTION_FULLSCREEN:
