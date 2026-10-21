@@ -1,5 +1,6 @@
 #define _DEFAULT_SOURCE
 #include "ui_krystal.h"
+#include "ui_eq.h"
 #include "krystal_engine.h"
 #include "ui_modal.h"
 #include "ui_common.h"
@@ -302,6 +303,13 @@ bool ui_krystal_handle_input(int ch) {
         return true;
     }
 
+    // Switch directly to EQ if requested
+    if (ch == 'E') {
+        ui_krystal_close();
+        ui_eq_toggle();
+        return true;
+    }
+
     if (ch == 'm' || ch == 'M') {
         s_arena_active = true;
         force_redraw = true;
@@ -389,7 +397,8 @@ bool ui_krystal_handle_input(int ch) {
         return true;
     }
 
-    return true;
+    // Allow global transport and player hotkeys to function
+    return false;
 }
 
 static void draw_param_row(int y, int x, int width, const char *label, const char *val_str, bool is_selected) {
@@ -534,7 +543,10 @@ static void draw_arena_mode(int y, int x, int h, int w, const KrystalConfig *cfg
 }
 
 void draw_krystal_panel(int y, int x, int h, int w) {
-    if (h < 8 || w < 32) return;
+    if (h < 6 || w < 24) {
+        if (h >= 3 && w >= 10) ui_draw_box(y, x, h, w, "Krystal (Window too small)", 2);
+        return;
+    }
 
     KrystalConfig cfg;
     krystal_get_config(&cfg);

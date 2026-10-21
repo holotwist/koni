@@ -357,11 +357,15 @@ bool ui_handle_input(int ch) {
         }
 
         case ACTION_TOGGLE_EQ:
+            if (is_fullscreen) is_fullscreen = false;
+            ui_krystal_close();
             ui_eq_toggle();
             force_redraw = true;
             break;
 
         case ACTION_TOGGLE_KRYSTAL:
+            if (is_fullscreen) is_fullscreen = false;
+            ui_eq_close();
             ui_krystal_toggle();
             force_redraw = true;
             break;

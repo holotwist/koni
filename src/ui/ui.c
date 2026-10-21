@@ -190,7 +190,8 @@ static void ui_loop(void) {
     int player_h = 5;
     if (player_h > draw_max_y) player_h = draw_max_y;
     
-    int lrc_h = (show_lrc_overlay && ui_cache.lrc_doc && active_tab != 2) ? 3 : 0;
+    bool eq_or_krystal = ui_eq_is_active() || ui_krystal_is_active();
+    int lrc_h = (show_lrc_overlay && ui_cache.lrc_doc && active_tab != 2 && !eq_or_krystal) ? 3 : 0;
     if (draw_max_y - player_h - lrc_h < 5) lrc_h = 0; // Fallback for tiny screens
     
     int top_h = draw_max_y - player_h - lrc_h;
@@ -200,12 +201,12 @@ static void ui_loop(void) {
     if (show_visualizer && browser_w < 35 && max_x >= 70) browser_w = 35;
     int vis_w = max_x - browser_w;
 
-    if (is_fullscreen) {
-        if (show_visualizer && top_h > 0) draw_vis_panel(0, 0, top_h, max_x);
-    } else if (ui_eq_is_active()) {
+    if (ui_eq_is_active()) {
         draw_eq_panel(0, 0, top_h, max_x);
     } else if (ui_krystal_is_active()) {
         draw_krystal_panel(0, 0, top_h, max_x);
+    } else if (is_fullscreen) {
+        if (show_visualizer && top_h > 0) draw_vis_panel(0, 0, top_h, max_x);
     } else if (is_vertical) {
         int vis_h = show_visualizer ? (top_h * 40 / 100) : 0;
         int browser_h = top_h - vis_h;

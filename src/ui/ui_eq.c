@@ -1,5 +1,6 @@
 #define _DEFAULT_SOURCE
 #include "ui_eq.h"
+#include "ui_krystal.h"
 #include "equalizer.h"
 #include "peq.h"
 #include "ui_modal.h"
@@ -284,6 +285,13 @@ bool ui_eq_handle_input(int ch) {
         return true;
     }
 
+    // Switch directly to Krystal if requested
+    if (ch == 'K') {
+        ui_eq_close();
+        ui_krystal_toggle();
+        return true;
+    }
+
     if (ch == '\t' || ch == 'm' || ch == 'M') {
         eq_toggle_mode();
         s_peq_editing = false;
@@ -305,7 +313,8 @@ bool ui_eq_handle_input(int ch) {
         return true;
     }
 
-    return true;
+    // Allow global transport and player hotkeys to function
+    return false;
 }
 
 static void draw_graphic_panel(int y, int x, int h, int w) {
@@ -654,7 +663,10 @@ static void draw_parametric_panel(int y, int x, int h, int w) {
 }
 
 void draw_eq_panel(int y, int x, int h, int w) {
-    if (h < 8 || w < 20) return;
+    if (h < 6 || w < 20) {
+        if (h >= 3 && w >= 10) ui_draw_box(y, x, h, w, "EQ (Window too small)", 2);
+        return;
+    }
 
     bool enabled = eq_is_enabled();
     EQMode mode = eq_get_mode();

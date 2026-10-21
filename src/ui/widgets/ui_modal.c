@@ -163,6 +163,12 @@ static void execute_add_to_queue(const char *path, const char *title) {
 }
 
 static void draw_modal_box(int y, int x, int h, int w, const char *title) {
+    int max_y, max_x;
+    getmaxyx(stdscr, max_y, max_x);
+    if (x < 1) x = 1;
+    if (y < 1) y = 1;
+    if (x + w >= max_x) w = max_x - x - 1;
+    if (y + h >= max_y) h = max_y - y - 1;
     for (int row = 0; row < h; row++) mvhline(y + row, x, ' ', w);
     ui_draw_box(y, x, h, w, title, 4);
 }
@@ -603,9 +609,9 @@ static void handle_playlist_action_select(int opt) {
 bool ui_modal_handle_input(int ch) {
     if (s_modal_type == MODAL_NONE) return false;
 
-    if (ch == 27) { // ESC
+    // ESC or 'q' to dismiss non-text modals
+    if (ch == 27 || (s_modal_type != MODAL_TEXT_INPUT && (ch == 'q' || ch == 'Q'))) {
         if (s_modal_type == MODAL_ADD_TO_PLAYLIST) {
-            // Return back to track actions
             s_modal_type = MODAL_TRACK_ACTIONS;
             s_selected_item = 3;
             force_redraw = true;
