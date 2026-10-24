@@ -13,7 +13,8 @@ typedef enum {
     MODAL_PLAYLIST_ACTIONS,
     MODAL_KRYSTAL_PRESETS,
     MODAL_EQ_PRESETS,
-    MODAL_PEQ_PRESETS
+    MODAL_PEQ_PRESETS,
+    MODAL_VIS_PICKER
 } ModalType;
 
 typedef struct {
@@ -39,6 +40,7 @@ void ui_modal_open_krystal_save(void);
 void ui_modal_open_eq_presets(void);
 void ui_modal_open_peq_presets(void);
 void ui_modal_open_peq_save(void);
+void ui_modal_open_vis_picker(void);
 
 // Input handling & rendering
 bool ui_modal_handle_input(int ch);

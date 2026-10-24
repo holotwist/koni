@@ -125,7 +125,7 @@ static const HelpItem help_items[] = {
     {"g", "RGain"},
     {"l", "Layout"},
     {"m", "Mute"},
-    {"c", "Vis"},
+    {"c/C", "Vis/Pick"},
     {"v", "Vis Toggle"},
     {"f", "Fullscr"},
     {"w", "Clear Q"},
@@ -154,8 +154,8 @@ static int ui_calculate_refresh_interval_ms(void) {
     bool vis_active = show_visualizer && (active_tab == 1) &&
                       (is_fullscreen || (!ui_eq_is_active() && !ui_krystal_is_active()));
 
-    // Keep framerate for Koni (dancer) animation
-    if (vis_active && current_vis_mode == 4) {
+    // Keep framerate for some animations
+    if (vis_active && (current_vis_mode == 4 || current_vis_mode == 5 || current_vis_mode == 6)) {
         return 25;
     }
 

@@ -15,6 +15,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+const char* get_vis_mode_name(int mode);
+
 typedef enum {
     TEXT_INPUT_CREATE_PLAYLIST = 0,
     TEXT_INPUT_RENAME_PLAYLIST,
@@ -100,6 +102,13 @@ void ui_modal_open_peq_presets(void) {
 
 void ui_modal_open_peq_save(void) {
     open_text_input("Save PEQ Preset As", "", TEXT_INPUT_SAVE_PEQ_PRESET);
+}
+
+void ui_modal_open_vis_picker(void) {
+    s_modal_type = MODAL_VIS_PICKER;
+    s_selected_item = (current_vis_mode >= 0 && current_vis_mode < 6) ? current_vis_mode : 0;
+    s_scroll_offset = 0;
+    force_redraw = true;
 }
 
 static void open_add_to_playlist_modal(void) {
@@ -486,6 +495,37 @@ static void render_peq_presets(int max_y, int max_x) {
     attroff(A_DIM | COLOR_PAIR(2));
 }
 
+static void render_vis_picker(int max_y, int max_x) {
+    int total = 7;
+    int w = 46;
+    int h = total + 5;
+    if (h > max_y - 2) h = max_y - 2;
+    int x = (max_x - w) / 2;
+    int y = (max_y - h) / 2;
+
+    draw_modal_box(y, x, h, w, "Select Visualizer");
+
+    for (int i = 0; i < total; i++) {
+        bool is_cur = (i == current_vis_mode);
+        char line[64];
+        snprintf(line, sizeof(line), "[%d] %-24.24s %s", i + 1, get_vis_mode_name(i), is_cur ? "★" : " ");
+
+        if (i == s_selected_item) {
+            attron(A_REVERSE | COLOR_PAIR(4) | A_BOLD);
+            mvprintw(y + 2 + i, x + 3, " %-38s ", line);
+            attroff(A_REVERSE | COLOR_PAIR(4) | A_BOLD);
+        } else {
+            attron(COLOR_PAIR(is_cur ? 3 : 2));
+            mvprintw(y + 2 + i, x + 3, "   %-36s ", line);
+            attroff(COLOR_PAIR(is_cur ? 3 : 2));
+        }
+    }
+
+    attron(A_DIM | COLOR_PAIR(2));
+    mvprintw(y + h - 2, x + 3, "[1..7] Select [Enter] Apply [Esc] Cancel");
+    attroff(A_DIM | COLOR_PAIR(2));
+}
+
 void ui_modal_render(int max_y, int max_x) {
     if (s_modal_type == MODAL_NONE) return;
     switch (s_modal_type) {
@@ -497,6 +537,7 @@ void ui_modal_render(int max_y, int max_x) {
         case MODAL_KRYSTAL_PRESETS:  render_krystal_presets(max_y, max_x); break;
         case MODAL_EQ_PRESETS:       render_eq_presets(max_y, max_x); break;
         case MODAL_PEQ_PRESETS:      render_peq_presets(max_y, max_x); break;
+        case MODAL_VIS_PICKER:       render_vis_picker(max_y, max_x); break;
         default: break;
     }
 }
@@ -765,6 +806,34 @@ bool ui_modal_handle_input(int ch) {
             } else {
                 ui_status_set("Cannot rename factory preset");
             }
+            return true;
+        }
+        return true;
+    }
+
+    if (s_modal_type == MODAL_VIS_PICKER) {
+        if (ch >= '1' && ch <= '7') {
+            current_vis_mode = ch - '1';
+            active_tab = 1;
+            ui_status_set("Visualizer: %s", get_vis_mode_name(current_vis_mode));
+            ui_modal_close();
+            return true;
+        }
+        if (ch == KEY_UP || ch == 'k') {
+            if (s_selected_item > 0) s_selected_item--;
+            force_redraw = true;
+            return true;
+        }
+        if (ch == KEY_DOWN || ch == 'j') {
+            if (s_selected_item < 6) s_selected_item++;
+            force_redraw = true;
+            return true;
+        }
+        if (ch == 10) {
+            current_vis_mode = s_selected_item;
+            active_tab = 1;
+            ui_status_set("Visualizer: %s", get_vis_mode_name(current_vis_mode));
+            ui_modal_close();
             return true;
         }
         return true;

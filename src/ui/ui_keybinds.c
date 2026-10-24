@@ -48,7 +48,8 @@ static const KeybindDefault s_defaults[] = {
     { ACTION_PREV,              "prev",             "b, B, <" },
     { ACTION_TAB_VIS,           "tab_vis",          "1" },
     { ACTION_TAB_LYRICS,        "tab_lyrics",       "2" },
-    { ACTION_VIS_MODE,          "vis_mode",         "c, C" },
+    { ACTION_VIS_PICKER,        "vis_picker",       "C" },
+    { ACTION_VIS_MODE,          "vis_mode",         "c" },
     { ACTION_FULLSCREEN,        "fullscreen",       "f" },
     { ACTION_TOGGLE_VIS,        "toggle_vis",       "v, V" },
     { ACTION_TOGGLE_LRC,        "toggle_lrc",       "y, Y" },
@@ -137,6 +138,18 @@ bool ui_keybinds_set(const char *action_name, const char *keys_str) {
         tok = strtok(NULL, ",;");
     }
     free(dup);
+
+    // Strip legacy uppercase C
+    if (strcasecmp(action_name, "vis_mode") == 0) {
+        int w = 0;
+        for (int i = 0; i < target->count; i++) {
+            if (target->keys[i] != 'C') {
+                target->keys[w++] = target->keys[i];
+            }
+        }
+        target->count = w;
+    }
+
     return true;
 }
 
