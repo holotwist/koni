@@ -251,6 +251,7 @@ bool ui_handle_input(int ch) {
             break;
             
         case ACTION_SWITCH_TAB:
+            if (ui_search_is_active()) ui_search_close();
             current_browser_tab = (current_browser_tab + 1) % 4;
             break;
             
@@ -461,6 +462,7 @@ bool ui_handle_input(int ch) {
             
         case ACTION_SEEK_BACK:
             if (current_browser_tab == TAB_PLAYLISTS && playlist_in_drilldown) {
+                if (ui_search_is_active()) ui_search_close();
                 playlist_in_drilldown = false;
                 force_redraw = true;
             } else {

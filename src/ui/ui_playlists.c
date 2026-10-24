@@ -14,6 +14,15 @@ void ui_playlists_invalidate_cache(void) {
     s_cached_name[0] = '\0';
 }
 
+const LoadedPlaylist* ui_playlists_get_current_loaded(void) {
+    if (active_playlist_name[0] != '\0' && strcmp(s_cached_name, active_playlist_name) != 0) {
+        playlist_mgmt_free_loaded(&s_drilldown_cache);
+        playlist_mgmt_load_playlist(active_playlist_name, &s_drilldown_cache);
+        strncpy(s_cached_name, active_playlist_name, sizeof(s_cached_name) - 1);
+    }
+    return &s_drilldown_cache;
+}
+
 void draw_playlists_panel(int y, int x, int h, int w) {
     if (h < 4 || w < 2) return;
 
@@ -21,14 +30,20 @@ void draw_playlists_panel(int y, int x, int h, int w) {
     int list_h = h - 2;
 
     if (!playlist_in_drilldown) {
-        // Playlists Overview List
+        int search_offset = ui_search_render_bar(start_y, x, w);
+        start_y += search_offset;
+        list_h -= search_offset;
+
+        static int filtered_map[8192];
+        bool search_active = ui_search_is_active();
         int total_playlists = playlist_mgmt_get_count();
+        int total_visible = search_active ? ui_search_get_filtered_indices(TAB_PLAYLISTS, filtered_map, 8192) : total_playlists;
 
-        int *cur_sel = &selected_playlist_browser_idx;
-        int *cur_scroll = &playlist_browser_scroll_offset;
+        int *cur_sel = search_active ? ui_search_get_selected_ptr() : &selected_playlist_browser_idx;
+        int *cur_scroll = search_active ? ui_search_get_scroll_ptr() : &playlist_browser_scroll_offset;
 
-        if (list_h > 0 && total_playlists > 0) {
-            if (*cur_sel >= total_playlists) *cur_sel = total_playlists - 1;
+        if (list_h > 0 && total_visible > 0) {
+            if (*cur_sel >= total_visible) *cur_sel = total_visible - 1;
             if (*cur_sel < *cur_scroll) *cur_scroll = *cur_sel;
             else if (*cur_sel >= *cur_scroll + list_h) *cur_scroll = *cur_sel - list_h + 1;
         }
@@ -38,20 +53,25 @@ void draw_playlists_panel(int y, int x, int h, int w) {
         int max_disp_len = w - 4;
         if (max_disp_len < 1) max_disp_len = 1;
 
-        if (total_playlists == 0) {
-            mvprintw(start_y + 1, x + 3, "No playlists found. Press 'i' on a track to create one.");
+        if (total_visible == 0) {
+            if (search_active && ui_search_get_query()[0]) {
+                mvprintw(start_y + 1, x + 3, "No matching playlists found.");
+            } else {
+                mvprintw(start_y + 1, x + 3, "No playlists found. Press 'i' on a track to create one.");
+            }
             return;
         }
 
-        for (int i = 0; i < list_h && i + *cur_scroll < total_playlists; i++) {
-            int idx = i + *cur_scroll;
+        for (int i = 0; i < list_h && i + *cur_scroll < total_visible; i++) {
+            int list_pos = i + *cur_scroll;
+            int idx = search_active ? filtered_map[list_pos] : list_pos;
             const PlaylistSummary *ps = playlist_mgmt_get_summary(idx);
             if (!ps) continue;
 
             bool is_active_playing_pl = (current_play_source == SOURCE_PLAYLIST &&
                                          strcmp(active_playlist_playback.name, ps->name) == 0);
 
-            if (idx == *cur_sel) attron(A_REVERSE | COLOR_PAIR(1));
+            if (list_pos == *cur_sel) attron(A_REVERSE | COLOR_PAIR(1));
             else if (is_active_playing_pl) attron(A_BOLD | COLOR_PAIR(4));
             else if (ps->is_favourites) attron(COLOR_PAIR(4) | A_BOLD);
             else attron(COLOR_PAIR(2));
@@ -75,35 +95,37 @@ void draw_playlists_panel(int y, int x, int h, int w) {
             mvprintw(start_y + i, x + 2, "%s", line_str);
             for (int p = line_w; p < max_disp_len; p++) printw(" ");
 
-            if (idx == *cur_sel) attroff(A_REVERSE | COLOR_PAIR(1));
+            if (list_pos == *cur_sel) attroff(A_REVERSE | COLOR_PAIR(1));
             else if (is_active_playing_pl) attroff(A_BOLD | COLOR_PAIR(4));
             else if (ps->is_favourites) attroff(COLOR_PAIR(4) | A_BOLD);
-            else attroff(COLOR_PAIR(2));
+            else attron(COLOR_PAIR(2));
         }
     } else {
-        // Drilldown Songs List
-        // Refresh cache if opening or changing playlist
-        if (strcmp(s_cached_name, active_playlist_name) != 0) {
-            playlist_mgmt_free_loaded(&s_drilldown_cache);
-            playlist_mgmt_load_playlist(active_playlist_name, &s_drilldown_cache);
-            strncpy(s_cached_name, active_playlist_name, sizeof(s_cached_name) - 1);
-        }
+        const LoadedPlaylist *pl = ui_playlists_get_current_loaded();
 
         // Subheader navigation bar
         mvhline(start_y, x + 1, ' ', w - 2);
         attron(COLOR_PAIR(4) | A_BOLD);
-        mvprintw(start_y, x + 2, "<- [..] %s (%d tracks)", active_playlist_name, s_drilldown_cache.count);
+        mvprintw(start_y, x + 2, "<- [..] %s (%d tracks)", active_playlist_name, pl->count);
         attroff(COLOR_PAIR(4) | A_BOLD);
 
         start_y++;
         list_h--;
 
-        int total_tracks = s_drilldown_cache.count;
-        int *cur_sel = &selected_playlist_track_idx;
-        int *cur_scroll = &playlist_track_scroll_offset;
+        int search_offset = ui_search_render_bar(start_y, x, w);
+        start_y += search_offset;
+        list_h -= search_offset;
 
-        if (list_h > 0 && total_tracks > 0) {
-            if (*cur_sel >= total_tracks) *cur_sel = total_tracks - 1;
+        static int filtered_map[8192];
+        bool search_active = ui_search_is_active();
+        int total_tracks = pl->count;
+        int total_visible = search_active ? ui_search_get_filtered_indices(TAB_PLAYLISTS, filtered_map, 8192) : total_tracks;
+
+        int *cur_sel = search_active ? ui_search_get_selected_ptr() : &selected_playlist_track_idx;
+        int *cur_scroll = search_active ? ui_search_get_scroll_ptr() : &playlist_track_scroll_offset;
+
+        if (list_h > 0 && total_visible > 0) {
+            if (*cur_sel >= total_visible) *cur_sel = total_visible - 1;
             if (*cur_sel < *cur_scroll) *cur_scroll = *cur_sel;
             else if (*cur_sel >= *cur_scroll + list_h) *cur_scroll = *cur_sel - list_h + 1;
         }
@@ -117,16 +139,21 @@ void draw_playlists_panel(int y, int x, int h, int w) {
             mvprintw(start_y + 1, x + 3, "Playlist is empty. Press 'i' on any track to add it here.");
             return;
         }
+        if (total_visible == 0) {
+            mvprintw(start_y + 1, x + 3, "No matching tracks found.");
+            return;
+        }
 
-        for (int i = 0; i < list_h && i + *cur_scroll < total_tracks; i++) {
-            int idx = i + *cur_scroll;
-            const PlaylistTrackItem *ti = &s_drilldown_cache.items[idx];
+        for (int i = 0; i < list_h && i + *cur_scroll < total_visible; i++) {
+            int list_pos = i + *cur_scroll;
+            int idx = search_active ? filtered_map[list_pos] : list_pos;
+            const PlaylistTrackItem *ti = &pl->items[idx];
 
             bool is_playing = (current_play_source == SOURCE_PLAYLIST &&
                                strcmp(playing_filepath, ti->path) == 0);
             bool is_fav = playlist_mgmt_is_favourite(ti->path);
 
-            if (idx == *cur_sel) attron(A_REVERSE | COLOR_PAIR(1));
+            if (list_pos == *cur_sel) attron(A_REVERSE | COLOR_PAIR(1));
             else if (is_playing) attron(A_BOLD | COLOR_PAIR(4));
             else attron(COLOR_PAIR(2));
 
@@ -144,7 +171,7 @@ void draw_playlists_panel(int y, int x, int h, int w) {
             char disp_buf[1024] = {0};
             int text_w = utf8_display_width(formatted);
 
-            if (idx == *cur_sel) {
+            if (list_pos == *cur_sel) {
                 get_marquee_text(formatted, text_w, max_disp_len, ui_frame_counter, disp_buf, sizeof(disp_buf));
             } else {
                 get_marquee_text(formatted, text_w, max_disp_len, 0, disp_buf, sizeof(disp_buf));
@@ -155,7 +182,7 @@ void draw_playlists_panel(int y, int x, int h, int w) {
             mvprintw(start_y + i, x + 2, "%.*s", print_bytes, disp_buf);
             for (int p = disp_w; p < max_disp_len; p++) printw(" ");
 
-            if (idx == *cur_sel) attroff(A_REVERSE | COLOR_PAIR(1));
+            if (list_pos == *cur_sel) attroff(A_REVERSE | COLOR_PAIR(1));
             else if (is_playing) attroff(A_BOLD | COLOR_PAIR(4));
             else attroff(COLOR_PAIR(2));
         }

@@ -63,6 +63,14 @@ int ui_search_get_filtered_indices(BrowserTab tab, int *out_indices, int max_cou
         if (tab == TAB_MUSIC) total = num_library_tracks;
         else if (tab == TAB_FILES) total = num_files;
         else if (tab == TAB_QUEUE) total = num_playlist_files;
+        else if (tab == TAB_PLAYLISTS) {
+            if (playlist_in_drilldown) {
+                const LoadedPlaylist *pl = ui_playlists_get_current_loaded();
+                total = pl ? pl->count : 0;
+            } else {
+                total = playlist_mgmt_get_count();
+            }
+        }
         if (total > max_count) total = max_count;
         for (int i = 0; i < total; i++) out_indices[i] = i;
         return total;
@@ -95,6 +103,29 @@ int ui_search_get_filtered_indices(BrowserTab tab, int *out_indices, int max_cou
                 ci_contains(playlist[i].meta.artist, query) ||
                 ci_contains(playlist[i].meta.album, query)) {
                 out_indices[count++] = i;
+            }
+        }
+    } else if (tab == TAB_PLAYLISTS) {
+        if (playlist_in_drilldown) {
+            const LoadedPlaylist *pl = ui_playlists_get_current_loaded();
+            if (pl) {
+                for (int i = 0; i < pl->count && count < max_count; i++) {
+                    const char *slash = strrchr(pl->items[i].path, '/');
+                    const char *fname = slash ? slash + 1 : pl->items[i].path;
+                    if (ci_contains(pl->items[i].title, query) ||
+                        ci_contains(pl->items[i].artist, query) ||
+                        ci_contains(fname, query)) {
+                        out_indices[count++] = i;
+                    }
+                }
+            }
+        } else {
+            int total = playlist_mgmt_get_count();
+            for (int i = 0; i < total && count < max_count; i++) {
+                const PlaylistSummary *ps = playlist_mgmt_get_summary(i);
+                if (ps && ci_contains(ps->name, query)) {
+                    out_indices[count++] = i;
+                }
             }
         }
     }
@@ -131,6 +162,16 @@ bool ui_search_handle_input(int ch, BrowserTab tab) {
                 selected_playlist_idx = target_idx;
                 playlist_scroll_offset = target_idx - 5;
                 if (playlist_scroll_offset < 0) playlist_scroll_offset = 0;
+            } else if (tab == TAB_PLAYLISTS) {
+                if (playlist_in_drilldown) {
+                    selected_playlist_track_idx = target_idx;
+                    playlist_track_scroll_offset = target_idx - 5;
+                    if (playlist_track_scroll_offset < 0) playlist_track_scroll_offset = 0;
+                } else {
+                    selected_playlist_browser_idx = target_idx;
+                    playlist_browser_scroll_offset = target_idx - 5;
+                    if (playlist_browser_scroll_offset < 0) playlist_browser_scroll_offset = 0;
+                }
             }
         }
         ui_search_close();
@@ -201,10 +242,22 @@ bool ui_search_handle_input(int ch, BrowserTab tab) {
                 selected_playlist_idx = target_idx;
                 playlist_scroll_offset = target_idx - 5;
                 if (playlist_scroll_offset < 0) playlist_scroll_offset = 0;
+            } else if (tab == TAB_PLAYLISTS) {
+                if (playlist_in_drilldown) {
+                    selected_playlist_track_idx = target_idx;
+                    playlist_track_scroll_offset = target_idx - 5;
+                    if (playlist_track_scroll_offset < 0) playlist_track_scroll_offset = 0;
+                } else {
+                    selected_playlist_browser_idx = target_idx;
+                    playlist_browser_scroll_offset = target_idx - 5;
+                    if (playlist_browser_scroll_offset < 0) playlist_browser_scroll_offset = 0;
+                }
             }
+            ui_search_close();
+            return false; // Fall through to trigger playback or playlist open
         }
         ui_search_close();
-        return false; // Let Enter fall through to trigger the actual playback
+        return true;
     }
 
     if (ch >= 32 && ch <= 126) {
