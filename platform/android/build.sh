@@ -34,13 +34,20 @@ echo "==> Target ABI:        ${TARGET_ABI}"
 BUILD_DIR="build_android_${TARGET_ABI}"
 mkdir -p "$BUILD_DIR"
 
-OPUS_CMAKE_ARGS=()
+CODEC_CMAKE_ARGS=()
 if [ -n "$OGG_DIR" ] && [ -n "$OPUS_DIR" ] && [ -n "$OPUSFILE_DIR" ]; then
     echo "==> Enabling Opus Codec support..."
-    OPUS_CMAKE_ARGS+=(
+    CODEC_CMAKE_ARGS+=(
         -DOGG_SOURCE_DIR="${OGG_DIR}"
         -DOPUS_SOURCE_DIR="${OPUS_DIR}"
         -DOPUSFILE_SOURCE_DIR="${OPUSFILE_DIR}"
+    )
+fi
+
+if [ -n "$FAAD_DIR" ]; then
+    echo "==> Enabling FAAD2 (AAC/M4A) Codec support..."
+    CODEC_CMAKE_ARGS+=(
+        -DFAAD_SOURCE_DIR="${FAAD_DIR}"
     )
 fi
 
@@ -57,18 +64,18 @@ cmake -B "$BUILD_DIR" \
     -DUSE_AUDIO="OFF" \
     -DRAYLIB_SOURCE_DIR="${RAYLIB_DIR}" \
     -DSQLITE_AMALGAMATION_DIR="${SQLITE_AMALG}" \
-    "${OPUS_CMAKE_ARGS[@]}"
+    "${CODEC_CMAKE_ARGS[@]}"
 
 cmake --build "$BUILD_DIR" --parallel
 
-# Compile Java activity and generate dex
+# Compile Java sources and generate dex
 echo "==> Compiling Java sources and running d8..."
 mkdir -p "${BUILD_DIR}/obj_java"
 javac -encoding UTF-8 \
     -source 8 -target 8 \
     -cp "$ANDROID_JAR" \
     -d "${BUILD_DIR}/obj_java" \
-    src/com/holotwist/koni/MainActivity.java
+    $(find src -name "*.java")
 
 "${BUILD_TOOLS_DIR}/d8" \
     --lib "$ANDROID_JAR" \

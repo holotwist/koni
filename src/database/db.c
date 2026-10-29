@@ -72,6 +72,18 @@ bool db_init(void) {
     return true;
 }
 
+void db_begin_transaction(void) {
+    pthread_mutex_lock(&db_mutex);
+    if (db) sqlite3_exec(db, "BEGIN TRANSACTION;", NULL, NULL, NULL);
+    pthread_mutex_unlock(&db_mutex);
+}
+
+void db_commit_transaction(void) {
+    pthread_mutex_lock(&db_mutex);
+    if (db) sqlite3_exec(db, "COMMIT;", NULL, NULL, NULL);
+    pthread_mutex_unlock(&db_mutex);
+}
+
 void db_shutdown(void) {
     pthread_mutex_lock(&db_mutex);
     if (db) {

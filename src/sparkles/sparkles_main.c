@@ -141,6 +141,109 @@ JNIEXPORT void JNICALL Java_com_holotwist_koni_MainActivity_saveStateNative(JNIE
     config_save();
 }
 
+JNIEXPORT void JNICALL Java_com_holotwist_koni_MainActivity_beginTransactionNative(JNIEnv *env, jclass cls) {
+    (void)env; (void)cls;
+    db_begin_transaction();
+}
+
+JNIEXPORT void JNICALL Java_com_holotwist_koni_MainActivity_commitTransactionNative(JNIEnv *env, jclass cls) {
+    (void)env; (void)cls;
+    db_commit_transaction();
+}
+
+JNIEXPORT void JNICALL Java_com_holotwist_koni_MainActivity_sendMediaCommandNative(JNIEnv *env, jclass cls, jint cmd, jlong arg) {
+    (void)env; (void)cls;
+    if (cmd == 1) { // Toggle play/pause
+        PlayState st = (PlayState)atomic_load(&play_state_atomic);
+        if (st == STATE_STOPPED && playing_filepath[0] != '\0') {
+            atomic_store(&current_cmd_atomic, CMD_PLAY);
+        } else {
+            atomic_store(&current_cmd_atomic, CMD_PAUSE);
+        }
+    } else if (cmd == 2) { // Next
+        atomic_store(&current_cmd_atomic, CMD_NEXT);
+    } else if (cmd == 3) { // Prev
+        atomic_store(&current_cmd_atomic, CMD_PREV);
+    } else if (cmd == 4) { // Seek
+        atomic_store(&seek_target_ms, (int)arg);
+        atomic_store(&current_cmd_atomic, CMD_SEEK);
+    } else if (cmd == 5) { // Play
+        if (atomic_load(&play_state_atomic) != STATE_PLAYING) {
+            if (atomic_load(&play_state_atomic) == STATE_STOPPED && playing_filepath[0] != '\0') {
+                atomic_store(&current_cmd_atomic, CMD_PLAY);
+            } else {
+                atomic_store(&current_cmd_atomic, CMD_PAUSE);
+            }
+        }
+    } else if (cmd == 6) { // Pause
+        if (atomic_load(&play_state_atomic) == STATE_PLAYING) {
+            atomic_store(&current_cmd_atomic, CMD_PAUSE);
+        }
+    }
+}
+
+static void update_android_media(float dt) {
+    static int s_last_track_id = -1;
+    static int s_last_play_state = -1;
+    static float s_poll_timer = 0.0f;
+
+    s_poll_timer += dt;
+    int cur_track = atomic_load(&current_track_id);
+    PlayState cur_st = (PlayState)atomic_load(&play_state_atomic);
+
+    bool track_changed = (cur_track != s_last_track_id);
+    bool state_changed = ((int)cur_st != s_last_play_state);
+
+    if (track_changed || state_changed || s_poll_timer >= 1.0f) {
+        s_poll_timer = 0.0f;
+        s_last_track_id = cur_track;
+        s_last_play_state = (int)cur_st;
+
+        extern struct android_app* GetAndroidApp(void);
+        struct android_app *app = GetAndroidApp();
+        if (!app || !app->activity || !app->activity->vm || !app->activity->clazz) return;
+
+        JavaVM *vm = app->activity->vm;
+        JNIEnv *env = NULL;
+        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK || !env) return;
+
+        jclass cls = (*env)->GetObjectClass(env, app->activity->clazz);
+        if (cls) {
+            jmethodID mid = (*env)->GetStaticMethodID(env, cls, "updateMediaStateFromNative",
+                "(ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;JJLjava/lang/String;)V");
+            if (mid) {
+                pthread_mutex_lock(&state_mutex);
+                const char *title = (p_metadata.title && p_metadata.title[0]) ? p_metadata.title : (playing_filename[0] ? playing_filename : "");
+                const char *artist = p_metadata.artist ? p_metadata.artist : "";
+                const char *album = p_metadata.album ? p_metadata.album : "";
+                const char *art_url = p_metadata.art_url;
+                const char *art_path = (art_url && strncmp(art_url, "file://", 7) == 0) ? (art_url + 7) : "";
+
+                jstring jtitle = (*env)->NewStringUTF(env, title);
+                jstring jartist = (*env)->NewStringUTF(env, artist);
+                jstring jalbum = (*env)->NewStringUTF(env, album);
+                jstring jart = (*env)->NewStringUTF(env, art_path);
+                pthread_mutex_unlock(&state_mutex);
+
+                uint32_t srate = atomic_load(&vis_srate);
+                if (srate == 0) srate = 44100;
+                jlong pos_ms = (jlong)(((uint64_t)atomic_load(&p_frames_consumed) * 1000ULL) / srate);
+                jlong dur_ms = (jlong)atomic_load(&p_total_sec) * 1000LL;
+                jint state = (jint)cur_st;
+
+                (*env)->CallStaticVoidMethod(env, cls, mid, state, jtitle, jartist, jalbum, pos_ms, dur_ms, jart);
+
+                if (jart) (*env)->DeleteLocalRef(env, jart);
+                if (jalbum) (*env)->DeleteLocalRef(env, jalbum);
+                if (jartist) (*env)->DeleteLocalRef(env, jartist);
+                if (jtitle) (*env)->DeleteLocalRef(env, jtitle);
+            }
+            if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+            (*env)->DeleteLocalRef(env, cls);
+        }
+    }
+}
+
 #ifdef __cplusplus
 }
 #endif
@@ -258,6 +361,10 @@ int main(int argc, char **argv) {
         // Process deferred glyph additions
         // 30s LRU eviction
         sparkles_font_update();
+
+#if defined(__ANDROID__) || defined(PLATFORM_ANDROID)
+        update_android_media(dt);
+#endif
 
         bool is_searching = tile_song_list_is_searching() || tile_playlists_is_searching() ||
                             sparkles_radial_list_is_open() || sparkles_input_is_text_active() ||
@@ -565,33 +672,38 @@ int main(int argc, char **argv) {
                      (int)q_box.x + 16, (int)(q_box.y + 68 * (ui_scale > 1.4f ? 1.2f : 1.0f)), FONT_SIZE_SM, COLOR_TEXT_MUTED);
 
             float btn_w = 90.0f * ui_scale;
-            float btn_h = fmaxf(44.0f, 36.0f * ui_scale); // Touch target standard
+            float btn_h = fmaxf(44.0f, 36.0f * ui_scale);
             Rectangle btn_yes = { q_box.x + q_box.width - (btn_w * 2.0f + 20.0f), q_box.y + q_box.height - btn_h - 14.0f, btn_w, btn_h };
             Rectangle btn_no  = { q_box.x + q_box.width - (btn_w + 10.0f),       q_box.y + q_box.height - btn_h - 14.0f, btn_w, btn_h };
 
             Vector2 tap;
-            bool tapped = sparkles_input_consume_tap((Rectangle){0, 0, sw, sh}, &tap);
-            bool pressed = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
-            Vector2 m = pressed ? GetMousePosition() : tap;
+            bool hit_yes = false;
+            bool hit_no  = false;
 
-            bool hit_yes = (tapped && CheckCollisionPointRec(tap, btn_yes)) || (pressed && CheckCollisionPointRec(m, btn_yes)) || IsKeyPressed(KEY_Y);
-            bool hit_no  = (tapped && CheckCollisionPointRec(tap, btn_no))  || (pressed && CheckCollisionPointRec(m, btn_no))  || IsKeyPressed(KEY_N);
+            if (sparkles_input_consume_tap((Rectangle){0, 0, sw, sh}, &tap)) {
+                if (CheckCollisionPointRec(tap, btn_yes)) hit_yes = true;
+                else if (CheckCollisionPointRec(tap, btn_no)) hit_no = true;
+            }
+            if (IsKeyPressed(KEY_Y)) hit_yes = true;
+            if (IsKeyPressed(KEY_N)) hit_no = true;
 
-            DrawRectangleRec(btn_yes, hit_yes ? ColorAlpha(COLOR_ACCENT, 0.35f) : (Color){ 18, 19, 24, 255 });
+            DrawRectangleRec(btn_yes, (Color){ 18, 19, 24, 255 });
             DrawRectangleLinesEx(btn_yes, 1.5f, COLOR_ACCENT);
             int tw_y = MeasureSparklesText("Yes", FONT_SIZE_SM);
             DrawSparklesText("Yes", (int)(btn_yes.x + (btn_w - tw_y) / 2), (int)(btn_yes.y + (btn_h - FONT_SIZE_SM) / 2), FONT_SIZE_SM, COLOR_TEXT_PRIMARY);
 
-            DrawRectangleRec(btn_no, hit_no ? ColorAlpha(COLOR_ACCENT, 0.35f) : (Color){ 18, 19, 24, 255 });
+            DrawRectangleRec(btn_no, (Color){ 18, 19, 24, 255 });
             DrawRectangleLinesEx(btn_no, 1.5f, COLOR_TEXT_MUTED);
             int tw_n = MeasureSparklesText("No", FONT_SIZE_SM);
             DrawSparklesText("No", (int)(btn_no.x + (btn_w - tw_n) / 2), (int)(btn_no.y + (btn_h - FONT_SIZE_SM) / 2), FONT_SIZE_SM, COLOR_TEXT_MUTED);
 
             if (hit_yes) {
+                sparkles_input_consume();
                 app_config.enable_listening_profile = true;
                 app_config.listening_profile_asked = true;
                 config_save();
             } else if (hit_no) {
+                sparkles_input_consume();
                 app_config.enable_listening_profile = false;
                 app_config.listening_profile_asked = true;
                 config_save();
@@ -628,24 +740,28 @@ int main(int argc, char **argv) {
             Rectangle btn_no  = { q_box.x + q_box.width - (btn_w + 10.0f),       q_box.y + q_box.height - btn_h - 14.0f, btn_w, btn_h };
 
             Vector2 tap;
-            bool tapped = sparkles_input_consume_tap((Rectangle){0, 0, sw, sh}, &tap);
-            bool pressed = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
-            Vector2 m = pressed ? GetMousePosition() : tap;
+            bool hit_yes = false;
+            bool hit_no  = false;
 
-            bool hit_yes = (tapped && CheckCollisionPointRec(tap, btn_yes)) || (pressed && CheckCollisionPointRec(m, btn_yes)) || IsKeyPressed(KEY_Y);
-            bool hit_no  = (tapped && CheckCollisionPointRec(tap, btn_no))  || (pressed && CheckCollisionPointRec(m, btn_no))  || IsKeyPressed(KEY_N);
+            if (sparkles_input_consume_tap((Rectangle){0, 0, sw, sh}, &tap)) {
+                if (CheckCollisionPointRec(tap, btn_yes)) hit_yes = true;
+                else if (CheckCollisionPointRec(tap, btn_no)) hit_no = true;
+            }
+            if (IsKeyPressed(KEY_Y)) hit_yes = true;
+            if (IsKeyPressed(KEY_N)) hit_no = true;
 
-            DrawRectangleRec(btn_yes, hit_yes ? ColorAlpha(COLOR_ACCENT, 0.35f) : (Color){ 18, 19, 24, 255 });
+            DrawRectangleRec(btn_yes, (Color){ 18, 19, 24, 255 });
             DrawRectangleLinesEx(btn_yes, 1.5f, COLOR_ACCENT);
             int tw_y = MeasureSparklesText("Yes", FONT_SIZE_SM);
             DrawSparklesText("Yes", (int)(btn_yes.x + (btn_w - tw_y) / 2), (int)(btn_yes.y + (btn_h - FONT_SIZE_SM) / 2), FONT_SIZE_SM, COLOR_TEXT_PRIMARY);
 
-            DrawRectangleRec(btn_no, hit_no ? ColorAlpha(COLOR_ACCENT, 0.35f) : (Color){ 18, 19, 24, 255 });
+            DrawRectangleRec(btn_no, (Color){ 18, 19, 24, 255 });
             DrawRectangleLinesEx(btn_no, 1.5f, COLOR_TEXT_MUTED);
             int tw_n = MeasureSparklesText("No", FONT_SIZE_SM);
             DrawSparklesText("No", (int)(btn_no.x + (btn_w - tw_n) / 2), (int)(btn_no.y + (btn_h - FONT_SIZE_SM) / 2), FONT_SIZE_SM, COLOR_TEXT_MUTED);
 
             if (hit_yes) {
+                sparkles_input_consume();
                 if (s_lyrics_modal_step == 0) {
                     app_config.online_lyrics = true;
                     app_config.online_lyrics_asked = true;
@@ -663,6 +779,7 @@ int main(int argc, char **argv) {
                     pthread_mutex_unlock(&state_mutex);
                 }
             } else if (hit_no) {
+                sparkles_input_consume();
                 if (s_lyrics_modal_step == 0) {
                     app_config.online_lyrics = false;
                     app_config.online_lyrics_asked = true;
@@ -728,5 +845,8 @@ int main(int argc, char **argv) {
 #endif
     sparkles_font_unload();
     CloseWindow();
+#if defined(__ANDROID__) || defined(PLATFORM_ANDROID)
+    exit(0);
+#endif
     return 0;
 }

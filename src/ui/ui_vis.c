@@ -7,7 +7,7 @@
 
 const char* get_vis_mode_name(int mode) {
     if (mode == 0) return "Spectrum";
-    if (mode == 1) return "Oscilloscope";
+    if (mode == 1) return vis_oscilloscope_is_true_mode() ? "True Scan" : "Slide Scan";
     if (mode == 2) return "Ellipse";
     if (mode == 3) return "Lissajous";
     if (mode == 4) return "Koni!";
@@ -29,6 +29,20 @@ void draw_vis_panel(int y, int x, int h, int w) {
     attroff(active_tab == 1 ? A_REVERSE : A_NORMAL); printw(" ");
     
     attron(active_tab == 2 ? A_REVERSE : A_NORMAL); printw("2:lyric"); attroff(active_tab == 2 ? A_REVERSE : A_NORMAL); printw(" ");
+
+    // Oscilloscope mode
+    if (active_tab == 1 && current_vis_mode == 1) {
+        char scope_tag[48];
+        snprintf(scope_tag, sizeof(scope_tag), "[%s: %ums | t:mode [/]:zoom]",
+                 vis_oscilloscope_is_true_mode() ? "True" : "Roll",
+                 vis_oscilloscope_get_timebase_ms());
+        int tag_w = utf8_display_width(scope_tag);
+        if (w > tag_w + 26) {
+            attron(A_DIM | COLOR_PAIR(2));
+            mvprintw(y, x + w - tag_w - 3, "%s", scope_tag);
+            attroff(A_DIM | COLOR_PAIR(2));
+        }
+    }
 
     // Render dynamic active extension tabs (e.g. 3:tracker)
     ExtTabDescriptor *ext_tabs[8];

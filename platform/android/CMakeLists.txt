@@ -34,6 +34,57 @@ if(NOT SQLITE_AMALGAMATION_DIR OR NOT EXISTS "${SQLITE_AMALGAMATION_DIR}/sqlite3
     message(FATAL_ERROR "SQLITE_AMALGAMATION_DIR not found. Set SQLITE_AMALG environment variable.")
 endif()
 
+# Resolve Android NDK app glue
+if(DEFINED ANDROID_NDK)
+    set(NDK_GLUE_DIR "${ANDROID_NDK}/sources/android/native_app_glue")
+elseif(DEFINED CMAKE_ANDROID_NDK)
+    set(NDK_GLUE_DIR "${CMAKE_ANDROID_NDK}/sources/android/native_app_glue")
+elseif(DEFINED ENV{ANDROID_NDK_ROOT})
+    set(NDK_GLUE_DIR "$ENV{ANDROID_NDK_ROOT}/sources/android/native_app_glue")
+endif()
+
+# Resolve FAAD2 source directory
+if(NOT FAAD_SOURCE_DIR AND DEFINED ENV{FAAD_DIR})
+    set(FAAD_SOURCE_DIR "$ENV{FAAD_DIR}")
+endif()
+
+set(M4A_SOURCES "")
+set(M4A_LIBS "")
+if(FAAD_SOURCE_DIR AND EXISTS "${FAAD_SOURCE_DIR}/CMakeLists.txt")
+    message(STATUS "==> FAAD2 (AAC/M4A) Codec support enabled")
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    add_subdirectory("${FAAD_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/faad_build" EXCLUDE_FROM_ALL)
+    set(M4A_SOURCES
+        ${KONI_ROOT}/src/codecs/m4a_codec/mp4_demux.c
+        ${KONI_ROOT}/src/codecs/m4a_codec/metadata.c
+        ${KONI_ROOT}/src/codecs/m4a_codec/m4a_codec.c
+    )
+    set(M4A_LIBS faad)
+    set(HAVE_FAAD TRUE)
+endif()
+
+# Check DANA
+set(DANA_SOURCES "")
+if(EXISTS "${KONI_ROOT}/src/dana")
+    add_compile_definitions(ENABLE_DANA)
+    include_directories(
+        ${KONI_ROOT}/src/dana/src/include/public
+        ${KONI_ROOT}/src/dana/src/include/private
+    )
+    file(GLOB DANA_SRCS "${KONI_ROOT}/src/dana/src/*.c")
+    foreach(src_file ${DANA_SRCS})
+        if(src_file MATCHES "main\\.c$" OR src_file MATCHES "danaplayd\\.c$")
+            list(REMOVE_ITEM DANA_SRCS ${src_file})
+        endif()
+    endforeach()
+    set(DANA_SOURCES
+        ${DANA_SRCS}
+        ${KONI_ROOT}/src/codecs/dana_codec/dana_codec.c
+        ${KONI_ROOT}/src/codecs/dana_codec/metadata.c
+    )
+    message(STATUS "==> DANA Audio Codec support enabled")
+endif()
+
 # Resolve Opus, Ogg, and Opusfile source directories
 if(NOT OGG_SOURCE_DIR AND DEFINED ENV{OGG_DIR})
     set(OGG_SOURCE_DIR "$ENV{OGG_DIR}")
@@ -143,7 +194,9 @@ set(KONI_CORE_SOURCES
     ${KONI_ROOT}/src/codecs/ogg_codec/metadata.c
     ${KONI_ROOT}/src/codecs/ma_codec/ma_codec.c
     ${KONI_ROOT}/src/codecs/ma_codec/metadata.c
+    ${M4A_SOURCES}
     ${OPUS_SOURCES}
+    ${DANA_SOURCES}
     ${KONI_ROOT}/src/database/db.c
     ${KONI_ROOT}/src/database/library_scanner.c
     ${KONI_ROOT}/src/playlist/playlist_manager.c
@@ -180,7 +233,7 @@ add_library(koni-sparkles SHARED
 )
 
 target_include_directories(koni-sparkles PRIVATE
-    ${ANDROID_NDK}/sources/android/native_app_glue
+    ${NDK_GLUE_DIR}
     ${KONI_ROOT}/src/include
     ${KONI_ROOT}/src/include/codec_api
     ${KONI_ROOT}/src/include/lyrics_api
@@ -192,9 +245,16 @@ target_include_directories(koni-sparkles PRIVATE
     ${KONI_ROOT}/src/audio/krystal
     ${KONI_ROOT}/src/ui/widgets
     ${KONI_ROOT}/src/codecs/pxtone_codec
+    ${KONI_ROOT}/src/codecs/m4a_codec
     ${KONI_ROOT}/src/codecs/opus_codec
     ${KONI_ROOT}/src/sparkles
 )
+
+if(HAVE_FAAD)
+    target_include_directories(koni-sparkles PRIVATE
+        ${FAAD_SOURCE_DIR}/include
+    )
+endif()
 
 if(HAVE_OPUS)
     target_include_directories(koni-sparkles PRIVATE
@@ -210,6 +270,7 @@ target_link_options(koni-sparkles PRIVATE "-uANativeActivity_onCreate" "-Wl,-Bsy
 target_link_libraries(koni-sparkles PRIVATE
     -Wl,--whole-archive raylib -Wl,--no-whole-archive
     sqlite3_amalg
+    ${M4A_LIBS}
     ${OPUS_LIBS}
     GLESv2
     EGL

@@ -22,6 +22,10 @@ typedef struct {
 bool db_init(void);
 void db_shutdown(void);
 
+// Transaction control
+void db_begin_transaction(void);
+void db_commit_transaction(void);
+
 // Track cache operations
 bool db_get_track_mtime(const char *filepath, time_t *out_mtime);
 bool db_get_track_meta(const char *filepath, time_t mtime, KoniMetadata *out_meta, uint32_t *out_duration);

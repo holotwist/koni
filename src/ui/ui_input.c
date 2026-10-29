@@ -13,6 +13,7 @@
 #include "ui_status.h"
 #include "ui_eq.h"
 #include "ui_krystal.h"
+#include "visualizers/visualizers.h"
 
 #include <ncurses.h>
 #include <string.h>
@@ -157,6 +158,14 @@ bool ui_handle_input(int ch) {
 
     if (ui_search_handle_input(ch, current_browser_tab)) {
         return true;
+    }
+
+    // Zoom/mode keys oscilloscope
+    if (active_tab == 1 && current_vis_mode == 1) {
+        if (vis_oscilloscope_handle_key(ch)) {
+            force_redraw = true;
+            return true;
+        }
     }
 
     // Allow active extensions to process hotkeys
