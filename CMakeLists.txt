@@ -53,8 +53,35 @@ find_package(CURL REQUIRED)
 set(CURL_TARGET ${CURL_LIBRARIES})
 
 if(NOT SQLITE3_TARGET)
-    find_package(SQLite3 REQUIRED)
-    set(SQLITE3_TARGET SQLite3::SQLite3)
+    # Find module first
+    find_package(SQLite3 QUIET)
+    
+    if(TARGET SQLite3::SQLite3)
+        set(SQLITE3_TARGET SQLite3::SQLite3)
+    elseif(SQLite3_FOUND)
+        set(SQLITE3_TARGET ${SQLite3_LIBRARIES})
+        include_directories(${SQLite3_INCLUDE_DIRS})
+    else()
+        # Fallback to pkg-config
+        if(PKG_CONFIG_FOUND)
+            pkg_check_modules(SQLITE3 QUIET sqlite3)
+        endif()
+        
+        if(SQLITE3_FOUND)
+            set(SQLITE3_TARGET ${SQLITE3_LIBRARIES})
+            include_directories(${SQLITE3_INCLUDE_DIRS})
+        else()
+            # Direct library search
+            find_path(SQLITE3_INCLUDE_DIRS NAMES sqlite3.h)
+            find_library(SQLITE3_LIBRARIES NAMES sqlite3)
+            if(SQLITE3_INCLUDE_DIRS AND SQLITE3_LIBRARIES)
+                set(SQLITE3_TARGET ${SQLITE3_LIBRARIES})
+                include_directories(${SQLITE3_INCLUDE_DIRS})
+            else()
+                message(FATAL_ERROR "SQLite3 not found! Please check installation.")
+            endif()
+        endif()
+    endif()
 endif()
 
 set(ENABLED_CODECS "")
